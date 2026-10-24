@@ -34,4 +34,14 @@ describe("OpenAI-compatible model catalog", () => {
       "https://codeflow.example/v1/models",
     );
   });
+
+  it("rejects plaintext HTTP endpoints before sending a provider key", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      discoverOpenRouterModels("secret", undefined, "http://192.168.1.4:8080/v1"),
+    ).rejects.toThrow(/HTTPS/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

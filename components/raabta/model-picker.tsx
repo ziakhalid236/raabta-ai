@@ -68,7 +68,7 @@ export function ModelPicker({
 
   const title = kind === "chat" ? t("Choose a chat model", "چیٹ ماڈل منتخب کریں") : t("Choose a voice model", "آواز کا ماڈل منتخب کریں");
   const subtitle = kind === "chat"
-    ? t("Names and image support from your loaded OpenRouter catalog", "آپ کی OpenRouter فہرست سے ماڈل نام اور image support")
+    ? t("Names and capabilities from your loaded provider catalog", "آپ کے provider کی فہرست سے ماڈل نام اور صلاحیتیں")
     : t("Models returned for OpenRouter speech transcription", "OpenRouter سے دستیاب آواز کی transcription کے ماڈلز");
 
   return (
@@ -129,7 +129,7 @@ export function ModelPicker({
         </View>
         {message ? <Text style={styles.message}>{message}</Text> : null}
         {loading && models.length === 0 ? (
-          <View style={styles.loading}><ActivityIndicator color={C.teal} /><Text style={styles.emptyText}>{t("Loading OpenRouter models…", "OpenRouter ماڈلز لوڈ ہو رہے ہیں…")}</Text></View>
+          <View style={styles.loading}><ActivityIndicator color={C.teal} /><Text style={styles.emptyText}>{t("Loading provider models…", "provider کے ماڈلز لوڈ ہو رہے ہیں…")}</Text></View>
         ) : filtered.length ? (
           <FlatList
             data={filtered}
@@ -166,7 +166,7 @@ export function ModelPicker({
             ListEmptyComponent={<Text style={styles.emptyText}>{t("No matching models. Try another search or refresh the catalog.", "کوئی ماڈل نہیں ملا۔ دوبارہ تلاش کریں یا فہرست تازہ کریں۔")}</Text>}
           />
         ) : (
-          <View style={styles.empty}><Ionicons name="cube-outline" size={28} color="#9AA29E" /><Text style={styles.emptyTitle}>{t("Connect OpenRouter to load models", "ماڈلز لوڈ کرنے کے لیے OpenRouter جوڑیں")}</Text><Text style={styles.emptyText}>{t("The picker only shows models returned by the catalog. Model access can still depend on your account and provider.", "یہاں صرف catalog میں ملنے والے ماڈلز دکھتے ہیں۔ رسائی پھر بھی آپ کے اکاؤنٹ اور provider پر منحصر ہو سکتی ہے۔")}</Text><Pressable onPress={onRefresh} disabled={loading} style={styles.refreshButton}><Text style={styles.refreshText}>{loading ? t("Loading…", "لوڈ ہو رہا ہے…") : t("Refresh catalog", "فہرست تازہ کریں")}</Text></Pressable></View>
+          <View style={styles.empty}><Ionicons name="cube-outline" size={28} color="#9AA29E" /><Text style={styles.emptyTitle}>{t("Connect your AI provider to load models", "ماڈلز لوڈ کرنے کے لیے اپنا AI provider جوڑیں")}</Text><Text style={styles.emptyText}>{t("The picker only shows models returned by the catalog. Model access can still depend on your account and provider.", "یہاں صرف catalog میں ملنے والے ماڈلز دکھتے ہیں۔ رسائی پھر بھی آپ کے اکاؤنٹ اور provider پر منحصر ہو سکتی ہے۔")}</Text><Pressable onPress={onRefresh} disabled={loading} style={styles.refreshButton}><Text style={styles.refreshText}>{loading ? t("Loading…", "لوڈ ہو رہا ہے…") : t("Refresh catalog", "فہرست تازہ کریں")}</Text></Pressable></View>
         )}
         <Text style={styles.footer}>{t("A catalog entry does not guarantee account access. Inference requests may incur provider charges.", "catalog میں ماڈل ہونا رسائی کی ضمانت نہیں۔ inference پر provider فیس لگ سکتی ہے۔")}</Text>
       </SafeAreaView>

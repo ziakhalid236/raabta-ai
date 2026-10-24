@@ -115,7 +115,7 @@ export function AccountsSheet({
                 <Ionicons name="sparkles" size={19} color={C.teal} />
               </View>
               <View style={styles.flex}>
-                <Text style={styles.serviceName}>OpenRouter</Text>
+                <Text style={styles.serviceName}>{t("AI provider", "AI provider")}</Text>
                 <Text style={styles.serviceDetail} numberOfLines={1}>
                   {openRouterConnected
                     ? selectedModelName ||
@@ -156,8 +156,8 @@ export function AccountsSheet({
               <Ionicons name="key-outline" size={16} color={C.teal} />
               <Text style={styles.manageText}>
                 {t(
-                  "Manage OpenRouter key & models",
-                  "OpenRouter key اور ماڈلز منظم کریں",
+                  "Manage provider key & models",
+                  "provider key اور ماڈلز منظم کریں",
                 )}
               </Text>
               <Ionicons name="chevron-forward" size={15} color={C.muted} />
@@ -326,8 +326,8 @@ export function AccountsSheet({
                       "Preview میں tokens صرف اسی browser session میں رہتے ہیں، web storage میں محفوظ نہیں ہوتے۔",
                     )
                   : t(
-                      "GitHub and OpenRouter tokens use separate Android SecureStore entries. Profile details and model choices remain local.",
-                      "GitHub اور OpenRouter tokens الگ Android SecureStore entries میں محفوظ ہیں۔ پروفائل اور ماڈل انتخاب فون پر رہتے ہیں۔",
+                      "GitHub and AI-provider keys use separate Android SecureStore entries. Profile details and model choices remain local.",
+                      "GitHub اور AI-provider keys الگ Android SecureStore entries میں محفوظ ہیں۔ پروفائل اور ماڈل انتخاب فون پر رہتے ہیں۔",
                     )}
               </Text>
             </View>

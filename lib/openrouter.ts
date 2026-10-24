@@ -71,6 +71,11 @@ async function fetchModelCollection(
 ): Promise<OpenRouterModel[]> {
   const normalizedBase = baseUrl.replace(/\/$/, "");
   const initial = new URL(`${normalizedBase}/models`);
+  if (initial.protocol !== "https:") {
+    throw new OpenRouterCatalogError(
+      "Use an HTTPS API base URL so the provider key is not sent in plain text.",
+    );
+  }
   const isOpenRouter = new URL(normalizedBase).hostname === "openrouter.ai";
   if (isOpenRouter) {
     initial.searchParams.set("output_modalities", outputModality);

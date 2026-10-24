@@ -97,7 +97,7 @@ export const LIVE_TOOL_DEFINITIONS: AiToolDefinition[] = [
     function: {
       name: "github_update_file",
       description:
-        "Update and commit a file in a connected GitHub repository. Autonomous coding is enabled by the user's policy.",
+        "Prepare a file update and commit in a connected GitHub repository. The app asks the user to approve before changing GitHub.",
       parameters: {
         type: "object",
         properties: {
@@ -116,7 +116,8 @@ export const LIVE_TOOL_DEFINITIONS: AiToolDefinition[] = [
     type: "function",
     function: {
       name: "github_create_issue",
-      description: "Create an issue in a connected GitHub repository.",
+      description:
+        "Prepare an issue in a connected GitHub repository. The app asks the user to approve before creating it.",
       parameters: {
         type: "object",
         properties: {
@@ -145,6 +146,65 @@ export const LIVE_TOOL_DEFINITIONS: AiToolDefinition[] = [
           base: string("Target branch"),
         },
         required: ["repository", "title", "body", "head", "base"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_workspace_list_files",
+      description:
+        "List files only inside Raabta's private, size-limited AI workspace on this device.",
+      parameters: {
+        type: "object",
+        properties: { directory: string("Relative workspace folder; empty means the workspace root") },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_workspace_read_file",
+      description:
+        "Read a text file only from the private Raabta AI workspace on this device.",
+      parameters: {
+        type: "object",
+        properties: { path: string("Relative file path inside the AI workspace") },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_workspace_write_file",
+      description:
+        "Create or replace a text file only inside the private Raabta AI workspace. Never use paths outside that workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: string("Relative file path inside the AI workspace"),
+          content: string("Complete text content to write"),
+        },
+        required: ["path", "content"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_workspace_delete_file",
+      description:
+        "Delete a file only from Raabta's private AI workspace. The app requires the user's explicit approval first.",
+      parameters: {
+        type: "object",
+        properties: { path: string("Relative file path inside the AI workspace") },
+        required: ["path"],
         additionalProperties: false,
       },
     },

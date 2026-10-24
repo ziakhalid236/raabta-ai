@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
 
 export type ChatAttachment = {
   id: string;
@@ -32,6 +33,7 @@ export type ChatPreferences = {
   language: "ur" | "en";
   openRouterConnected: boolean;
   providerBaseUrl: string;
+  providerKeyBaseUrl: string;
   modelId: string;
   modelName: string;
   modelSupportsImages: boolean;
@@ -53,7 +55,8 @@ const LEGACY_PREFERENCES_KEYS = [
 export const DEFAULT_PREFERENCES: ChatPreferences = {
   language: "en",
   openRouterConnected: false,
-  providerBaseUrl: "https://openrouter.ai/api/v1",
+  providerBaseUrl: DEFAULT_PROVIDER_BASE_URL,
+  providerKeyBaseUrl: "",
   modelId: "",
   modelName: "",
   modelSupportsImages: false,
@@ -103,16 +106,28 @@ export async function loadPreferences(): Promise<ChatPreferences> {
     const parsed: unknown = JSON.parse(stored);
     const data = asRecord(parsed);
     if (!data) return DEFAULT_PREFERENCES;
+    const providerBaseUrl =
+      isCurrentSchema &&
+      typeof data.providerBaseUrl === "string" &&
+      data.providerBaseUrl.trim()
+        ? data.providerBaseUrl.trim().replace(/\/$/, "")
+        : DEFAULT_PROVIDER_BASE_URL;
+    const providerKeyBaseUrl = isCurrentSchema
+      ? typeof data.providerKeyBaseUrl === "string" && data.providerKeyBaseUrl.trim()
+        ? data.providerKeyBaseUrl.trim().replace(/\/$/, "")
+        : data.openRouterConnected === true
+          ? providerBaseUrl
+          : ""
+      : "";
     return {
       language: data.language === "ur" ? "ur" : "en",
-      // Old custom-provider keys/model IDs must be explicitly reconnected to OpenRouter.
-      openRouterConnected: isCurrentSchema && data.openRouterConnected === true,
-      providerBaseUrl:
+      // Credentials are valid only for the endpoint to which they were explicitly connected.
+      openRouterConnected:
         isCurrentSchema &&
-        typeof data.providerBaseUrl === "string" &&
-        data.providerBaseUrl.trim()
-          ? data.providerBaseUrl.trim().replace(/\/$/, "")
-          : "https://openrouter.ai/api/v1",
+        data.openRouterConnected === true &&
+        sameProviderEndpoint(providerKeyBaseUrl, providerBaseUrl),
+      providerBaseUrl,
+      providerKeyBaseUrl,
       modelId: isCurrentSchema ? stringValue(data.modelId) : "",
       modelName: isCurrentSchema ? stringValue(data.modelName) : "",
       modelSupportsImages: isCurrentSchema && data.modelSupportsImages === true,

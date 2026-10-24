@@ -36,6 +36,14 @@ import {
   requestChatCompletion,
 } from "@/lib/ai-client";
 import { LIVE_TOOL_DEFINITIONS } from "@/lib/ai-tools";
+import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
+import {
+  deleteAIWorkspaceFile,
+  getAIWorkspaceUsage,
+  listAIWorkspaceFiles,
+  readAIWorkspaceFile,
+  writeAIWorkspaceFile,
+} from "@/lib/ai-workspace";
 import {
   createThread,
   DEFAULT_PREFERENCES,
@@ -168,6 +176,12 @@ export default function HomeScreen() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const [openRouterConnected, setOpenRouterConnected] = useState(false);
+  const isProviderDraftConnected =
+    openRouterConnected &&
+    sameProviderEndpoint(
+      preferences.providerKeyBaseUrl,
+      providerBaseUrlDraft.trim() || preferences.providerBaseUrl,
+    );
   const [modelCatalog, setModelCatalog] = useState<OpenRouterCatalog | null>(
     null,
   );
@@ -315,11 +329,16 @@ export default function HomeScreen() {
     )
       return;
     setShowError("");
-    if (!openRouterConnected || !preferences.modelId.trim() || !hasKey) {
+    if (
+      !openRouterConnected ||
+      !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl) ||
+      !preferences.modelId.trim() ||
+      !hasKey
+    ) {
       setShowError(
         t(
-          "Connect your OpenRouter key and choose a chat model in Settings before sending.",
-          "بھیجنے سے پہلے Settings میں OpenRouter key جوڑیں اور chat model منتخب کریں۔",
+          "Connect an AI provider and choose a chat model in Settings before sending.",
+          "بھیجنے سے پہلے Settings میں AI provider جوڑیں اور chat model منتخب کریں۔",
         ),
       );
       setPanel("settings");
@@ -453,6 +472,29 @@ export default function HomeScreen() {
               controller.signal,
             ),
           );
+        if (name === "ai_workspace_list_files")
+          return JSON.stringify({
+            files: await listAIWorkspaceFiles(
+              typeof args.directory === "string" ? args.directory : "",
+            ),
+            ...(await getAIWorkspaceUsage()),
+          });
+        if (name === "ai_workspace_read_file")
+          return JSON.stringify({
+            path: String(args.path ?? ""),
+            content: await readAIWorkspaceFile(String(args.path ?? "")),
+          });
+        if (name === "ai_workspace_write_file")
+          return JSON.stringify(
+            await writeAIWorkspaceFile(
+              String(args.path ?? ""),
+              String(args.content ?? ""),
+            ),
+          );
+        if (name === "ai_workspace_delete_file")
+          return JSON.stringify(
+            await deleteAIWorkspaceFile(String(args.path ?? "")),
+          );
         const githubToken = await readGitHubToken();
         if (!githubToken)
           return "GitHub is not connected in this app. Ask the user to connect it first.";
@@ -525,6 +567,10 @@ export default function HomeScreen() {
         const labels: Record<string, [string, string]> = {
           web_search: ["Searching the public web", "عوامی ویب پر تلاش جاری ہے"],
           read_public_web_page: ["Reading a public web page", "عوامی ویب صفحہ پڑھا جا رہا ہے"],
+          ai_workspace_list_files: ["Listing files in the private AI workspace", "نجی AI workspace کی فائلیں دیکھی جا رہی ہیں"],
+          ai_workspace_read_file: ["Reading a private workspace file", "نجی workspace فائل پڑھی جا رہی ہے"],
+          ai_workspace_write_file: ["Writing a private workspace file", "نجی workspace فائل لکھی جا رہی ہے"],
+          ai_workspace_delete_file: ["Preparing to delete a private workspace file", "نجی workspace فائل حذف کرنے کی تیاری"],
           github_list_repositories: ["Listing GitHub repositories", "GitHub repositories دیکھی جا رہی ہیں"],
           github_list_files: ["Listing repository files", "repository کی فائلیں دیکھی جا رہی ہیں"],
           github_read_file: ["Reading a repository file", "repository کی فائل پڑھی جا رہی ہے"],
@@ -543,7 +589,8 @@ export default function HomeScreen() {
         const writeAction =
           name === "github_update_file" ||
           name === "github_create_issue" ||
-          name === "github_create_pull_request";
+          name === "github_create_pull_request" ||
+          name === "ai_workspace_delete_file";
         updateThread(currentThread.id, (thread) => ({
           ...thread,
           updatedAt: createdAt,
@@ -573,16 +620,18 @@ export default function HomeScreen() {
         try {
           if (writeAction) {
             const summary =
-              name === "github_update_file"
+              name === "ai_workspace_delete_file"
+                ? `Delete ${path} from the private AI workspace`
+                : name === "github_update_file"
                 ? `Commit ${path} in ${repo}`
                 : name === "github_create_issue"
                   ? `Create issue in ${repo}: ${String(args.title ?? "")}`
                   : `Open pull request in ${repo}: ${String(args.title ?? "")}`;
-            const approved = await requestGitHubActionApproval(summary);
+            const approved = await requestSensitiveActionApproval(summary);
             if (!approved) {
               const cancelled = t(
-                "Cancelled by you; no GitHub change was made.",
-                "آپ نے منسوخ کیا؛ GitHub میں کوئی تبدیلی نہیں کی گئی۔",
+                "Cancelled by you; no change was made.",
+                "آپ نے منسوخ کیا؛ کوئی تبدیلی نہیں کی گئی۔",
               );
               finishEvent(cancelled, "stopped");
               return cancelled;
@@ -761,7 +810,13 @@ export default function HomeScreen() {
   }
 
   async function transcribeAudioFile(file: LocalAudioFile) {
-    if (!openRouterConnected || !preferences.transcriptionModelId || !hasKey) {
+    if (
+      !openRouterConnected ||
+      !sameProviderEndpoint(preferences.providerBaseUrl, DEFAULT_PROVIDER_BASE_URL) ||
+      !sameProviderEndpoint(preferences.providerKeyBaseUrl, DEFAULT_PROVIDER_BASE_URL) ||
+      !preferences.transcriptionModelId ||
+      !hasKey
+    ) {
       setShowError(
         t(
           "Connect OpenRouter and choose a transcription model in Settings before using voice input.",
@@ -966,13 +1021,22 @@ export default function HomeScreen() {
 
   async function connectOpenRouter() {
     if (isTestingConnection) return;
+    const providerBaseUrl = (
+      providerBaseUrlDraft.trim() ||
+      preferences.providerBaseUrl ||
+      DEFAULT_PROVIDER_BASE_URL
+    ).replace(/\/$/, "");
     let candidateKey = keyDraft.trim();
-    if (!candidateKey && preferences.openRouterConnected) {
+    if (
+      !candidateKey &&
+      preferences.openRouterConnected &&
+      sameProviderEndpoint(preferences.providerKeyBaseUrl, providerBaseUrl)
+    ) {
       try {
         candidateKey = (await readApiKey()) ?? "";
       } catch {
         setSettingsNotice(
-          "Could not read the saved key securely. Try again or paste a new OpenRouter key.",
+            "Could not read the saved key securely. Try again or paste a new provider key.",
         );
         return;
       }
@@ -980,8 +1044,8 @@ export default function HomeScreen() {
     if (!candidateKey) {
       setSettingsNotice(
         t(
-          "Paste your OpenRouter API key. A previously saved provider key is not sent to OpenRouter until you enter it again.",
-          "اپنی OpenRouter API key درج کریں۔ پہلے محفوظ provider key کو دوبارہ درج کیے بغیر OpenRouter کو نہیں بھیجا جائے گا۔",
+          "Paste the API key for this endpoint. The saved key belongs to a different endpoint and was not sent.",
+          "اس endpoint کی API key درج کریں۔ محفوظ key کسی دوسرے endpoint سے منسلک ہے، اس لیے اسے نہیں بھیجا گیا۔",
         ),
       );
       return;
@@ -990,11 +1054,6 @@ export default function HomeScreen() {
     setIsTestingConnection(true);
     setSettingsNotice("");
     try {
-      const providerBaseUrl = (
-        providerBaseUrlDraft.trim() ||
-        preferences.providerBaseUrl ||
-        "https://openrouter.ai/api/v1"
-      ).replace(/\/$/, "");
       const catalog = await discoverOpenRouterModels(
         candidateKey,
         undefined,
@@ -1006,7 +1065,7 @@ export default function HomeScreen() {
       const selectedVoice = catalog.transcriptionModels.find(
         (model) => model.id === preferences.transcriptionModelId,
       );
-      // Save a new key only after OpenRouter successfully returns the chat catalog.
+      // Bind the key to this endpoint only after the model catalog succeeds.
       await writeApiKey(candidateKey);
       setHasKey(true);
       setOpenRouterConnected(true);
@@ -1017,6 +1076,7 @@ export default function HomeScreen() {
         ...preferences,
         openRouterConnected: true,
         providerBaseUrl,
+        providerKeyBaseUrl: providerBaseUrl,
         modelId: selectedChat?.id ?? "",
         modelName: selectedChat?.name ?? "",
         modelSupportsImages: Boolean(
@@ -1169,6 +1229,7 @@ export default function HomeScreen() {
       const nextPreferences = {
         ...preferences,
         openRouterConnected: false,
+        providerKeyBaseUrl: "",
         modelId: "",
         modelName: "",
         modelSupportsImages: false,
@@ -1340,8 +1401,8 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.welcomeCopy}>
                   {t(
-                    "Connect one OpenRouter key, choose a model by name, and keep your conversation history on this device.",
-                    "ایک OpenRouter key جوڑیں، نام سے model منتخب کریں، اور اپنی گفتگو اسی فون پر محفوظ رکھیں۔",
+          "Connect an AI provider, choose a model by name, and keep your conversation history on this device.",
+          "ایک AI provider جوڑیں، نام سے model منتخب کریں، اور اپنی گفتگو اسی فون پر محفوظ رکھیں۔",
                   )}
                 </Text>
                 <Pressable
@@ -1955,8 +2016,8 @@ export default function HomeScreen() {
           <FieldLabel
             title={t("Provider API base URL", "Provider API base URL")}
             subtitle={t(
-              "Use OpenRouter or any OpenAI-compatible /v1 endpoint. The key stays in secure storage.",
-              "OpenRouter یا کسی بھی OpenAI-compatible /v1 endpoint کا استعمال کریں۔ key محفوظ storage میں رہتی ہے۔",
+              "OpenRouter is the default. Use an HTTPS OpenAI-compatible /v1 base URL; the key stays bound to that endpoint.",
+              "OpenRouter پہلے سے منتخب ہے۔ HTTPS OpenAI-compatible /v1 base URL دیں؛ key اسی endpoint سے منسلک رہتی ہے۔",
             )}
           />
           <TextInput
@@ -1969,6 +2030,12 @@ export default function HomeScreen() {
             placeholderTextColor="#9AA29E"
             style={[styles.fieldInput, styles.autoDirection]}
           />
+          <Notice
+            text={t(
+              "AI workspace files stay in Raabta's private app storage (25 MB total; 512 KB per file). The agent cannot access your other phone files or run arbitrary terminal commands.",
+              "AI workspace کی فائلیں رابطہ کی نجی app storage میں رہتی ہیں (کل 25 MB؛ فی فائل 512 KB)۔ ایجنٹ دوسری فون فائلیں نہیں پڑھ سکتا اور خود سے terminal commands نہیں چلا سکتا۔",
+            )}
+          />
           <View style={styles.keyInputWrap}>
             <TextInput
               accessibilityLabel="Provider API key"
@@ -1979,10 +2046,15 @@ export default function HomeScreen() {
               onChangeText={setKeyDraft}
               placeholder={
                 hasKey
-                  ? t(
-                      "Key stored securely · paste only to replace",
-                      "key محفوظ ہے · بدلنے کے لیے نئی key درج کریں",
-                    )
+                  ? isProviderDraftConnected
+                    ? t(
+                        "Key stored securely · paste only to replace",
+                        "key محفوظ ہے · بدلنے کے لیے نئی key درج کریں",
+                      )
+                    : t(
+                        "Enter the key for this provider; the saved key will not be sent",
+                        "اس provider کی key درج کریں؛ محفوظ key یہاں نہیں بھیجی جائے گی",
+                      )
                   : t(
                       "Paste your provider API key",
                       "اپنے provider کی API key درج کریں",
@@ -2012,22 +2084,22 @@ export default function HomeScreen() {
           <View style={styles.keyStatus}>
             <Ionicons
               name={
-                openRouterConnected
+                isProviderDraftConnected
                   ? "checkmark-circle"
                   : hasKey
                     ? "lock-closed"
                     : "information-circle-outline"
               }
               size={15}
-              color={openRouterConnected ? C.teal : C.muted}
+              color={isProviderDraftConnected ? C.teal : C.muted}
             />
             <Text
               style={[
                 styles.keyStatusText,
-                openRouterConnected && styles.keyStatusReady,
+                isProviderDraftConnected && styles.keyStatusReady,
               ]}
             >
-              {openRouterConnected
+              {isProviderDraftConnected
                 ? Platform.OS === "web"
                   ? t(
                       "Connected in this browser session",
@@ -2039,12 +2111,12 @@ export default function HomeScreen() {
                     )
                 : hasKey
                   ? t(
-                      "A key is stored; connect it to verify OpenRouter and load models",
-                      "ایک key محفوظ ہے؛ OpenRouter کی تصدیق اور ماڈلز لوڈ کرنے کے لیے Connect کریں",
+                      "A key is stored; enter this endpoint's key and connect to load models",
+                      "ایک key محفوظ ہے؛ اس endpoint کی key درج کرکے ماڈلز لوڈ کریں",
                     )
                   : t(
-                      "No OpenRouter key connected",
-                      "OpenRouter key منسلک نہیں",
+                      "No provider key connected",
+                      "provider کی key منسلک نہیں",
                     )}
             </Text>
             {hasKey ? (
@@ -2082,23 +2154,24 @@ export default function HomeScreen() {
                 : t("Connect & load models", "منسلک کریں اور ماڈلز لوڈ کریں")}
             </Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="link"
-            onPress={() =>
-              void Linking.openURL("https://openrouter.ai/keys").catch(
-                () => undefined,
-              )
-            }
-            style={styles.toolChip}
-          >
-            <Ionicons name="open-outline" size={14} color={C.teal} />
-            <Text style={styles.toolChipText}>
-              {t(
-                "Get or manage an OpenRouter key",
-                "OpenRouter key حاصل یا منظم کریں",
-              )}
-            </Text>
-          </Pressable>
+          {(providerBaseUrlDraft || preferences.providerBaseUrl).includes(
+            "openrouter.ai",
+          ) ? (
+            <Pressable
+              accessibilityRole="link"
+              onPress={() =>
+                void Linking.openURL("https://openrouter.ai/keys").catch(
+                  () => undefined,
+                )
+              }
+              style={styles.toolChip}
+            >
+              <Ionicons name="open-outline" size={14} color={C.teal} />
+              <Text style={styles.toolChipText}>
+                {t("Get or manage an OpenRouter key", "OpenRouter key حاصل یا منظم کریں")}
+              </Text>
+            </Pressable>
+          ) : null}
 
           <FieldLabel
             title={t("Chat model", "چیٹ ماڈل")}
@@ -2110,11 +2183,11 @@ export default function HomeScreen() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              if (!openRouterConnected) {
+              if (!isProviderDraftConnected) {
                 setSettingsNotice(
                   t(
-                    "Connect OpenRouter before browsing models.",
-                    "ماڈلز دیکھنے سے پہلے OpenRouter جوڑیں۔",
+                    "Connect your AI provider before browsing models.",
+                    "ماڈلز دیکھنے سے پہلے اپنا AI provider جوڑیں۔",
                   ),
                 );
                 return;
@@ -2177,11 +2250,15 @@ export default function HomeScreen() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              if (!openRouterConnected) {
+              if (
+                !isProviderDraftConnected ||
+                !sameProviderEndpoint(preferences.providerBaseUrl, DEFAULT_PROVIDER_BASE_URL) ||
+                !sameProviderEndpoint(preferences.providerKeyBaseUrl, DEFAULT_PROVIDER_BASE_URL)
+              ) {
                 setSettingsNotice(
                   t(
-                    "Connect OpenRouter before browsing models.",
-                    "ماڈلز دیکھنے سے پہلے OpenRouter جوڑیں۔",
+                    "Voice transcription currently requires a connected OpenRouter endpoint and its matching key.",
+                    "آواز کی transcription کے لیے OpenRouter endpoint اور اسی سے منسلک key درکار ہے۔",
                   ),
                 );
                 return;
@@ -2870,14 +2947,15 @@ function RoadmapCard({
   );
 }
 
-function requestGitHubActionApproval(summary: string): Promise<boolean> {
-  const message = `${summary}\n\nThis will change your GitHub account. Continue?`;
+function requestSensitiveActionApproval(summary: string): Promise<boolean> {
+  const isGitHubAction = summary.includes(" in ") || summary.startsWith("Open pull request");
+  const message = `${summary}\n\n${isGitHubAction ? "This will change your GitHub account." : "This will permanently delete a private workspace file."} Continue?`;
   if (Platform.OS === "web" && typeof window !== "undefined") {
     return Promise.resolve(window.confirm(message));
   }
   return new Promise((resolve) => {
     Alert.alert(
-      "Approve GitHub action?",
+      isGitHubAction ? "Approve GitHub action?" : "Approve deletion?",
       message,
       [
         { text: "Cancel", style: "cancel", onPress: () => resolve(false) },

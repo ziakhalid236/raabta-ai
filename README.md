@@ -20,7 +20,7 @@ Start, reopen and resume locally stored conversations, stop an in-flight request
 
 ### Stage 3 — Bounded assistant tasks
 
-Web research, source retrieval, local attachment preparation and model answering are user-triggered workflows. Each live tool action is shown in the persistent Action Timeline. GitHub file commits, issue creation and pull requests require a separate approval prompt before the request is sent. Work does not continue in the background while the app is locked.
+Web research, source retrieval, local attachment preparation and model answering are user-triggered workflows. Each live tool action is shown in the persistent Action Timeline. The agent can list, read and create/update text files in a private app-only workspace capped at 25 MB total and 512 KB per file; deleting a workspace file requires confirmation. This workspace cannot access the phone's other files and is not a command-line shell: it cannot execute arbitrary terminal commands or install packages. GitHub writes require a separate approval prompt before the request is sent. Work does not continue in the background while the app is locked.
 
 ### Stage 4 — Accounts: permissioned GitHub tools
 
@@ -31,7 +31,7 @@ YouTube, MCP servers, deleting files, merging pull requests and deployment actio
 ## Privacy and permissions
 
 - On Android, the provider API key and GitHub token are held in separate Expo SecureStore entries. The app does not bundle keys or copy them into messages, chat preferences or Action Timeline records. Browser Preview keeps both credentials in session memory only.
-- Conversation history, action events, non-secret preferences, profile display details and app-copied attachments stay in the local app sandbox through AsyncStorage/app documents. Chat storage is **not separately encrypted by Raabta**; use the device's screen lock.
+- Conversation history, action events, non-secret preferences, profile display details, workspace files and app-copied attachments stay in local app-private storage through AsyncStorage/app documents. Chat storage is **not separately encrypted by Raabta**; use the device's screen lock.
 - Prompts and any image/document/source/audio selected for a task are transmitted to the configured AI provider only when you explicitly run the task. Provider processing, billing and retention policies are outside Raabta's control.
 - A web search query is sent to DuckDuckGo. Retrieved excerpts and links are then included in the AI-provider request you explicitly initiated.
 - GitHub is contacted when you connect the account or when a tool action is requested. GitHub writes require an approval prompt. Disconnect deletes the app's stored credential, not the remote GitHub token.
@@ -39,12 +39,14 @@ YouTube, MCP servers, deleting files, merging pull requests and deployment actio
 
 ## Connect an AI provider
 
-1. For OpenRouter, create a key at [openrouter.ai/keys](https://openrouter.ai/keys). For another provider, use its API key and OpenAI-compatible base URL ending in `/v1`.
+1. For OpenRouter, create a key at [openrouter.ai/keys](https://openrouter.ai/keys). For another provider, use its API key and HTTPS OpenAI-compatible base URL ending in `/v1`.
 2. Open **Settings**, enter the key and base URL, then choose **Connect & load models**. Raabta requests `/models`; it does not send a test prompt. On Android, the key is stored in SecureStore only after the catalog request succeeds.
 3. Choose a listed chat model. Use the image-capable filter only when the catalog reports image support. Speech transcription is currently cataloged through OpenRouter's transcription endpoint.
-4. Send a question when ready. Provider/model access, quotas and charges depend on your provider. For a self-hosted endpoint, make sure the phone can reach the server; `localhost` on a phone refers to the phone itself, not a computer running the model.
+4. Send a question when ready. Provider/model access, quotas and charges depend on your provider. For a self-hosted endpoint, use a reachable HTTPS server; `localhost` on a phone refers to the phone itself, not a computer running the model. Plain HTTP endpoints are rejected to protect API keys.
 
-OpenAI-compatible model lists sometimes return only model IDs; Raabta uses those IDs as their selectable names. Custom servers without a compatible `/models` endpoint are not yet supported by automatic discovery. Existing saved keys are not silently sent to a different provider; enter and connect the intended key explicitly.
+OpenAI-compatible model lists sometimes return only model IDs; Raabta uses those IDs as their selectable names. Custom servers without a compatible `/models` endpoint are not yet supported by automatic discovery. The saved API key is bound to the successfully connected base URL: changing the URL does not forward the previous key, and you must enter the key intended for the new endpoint.
+
+Native Anthropic Messages and Gemini `generateContent` endpoints use different request, model-list and tool-call formats, so a direct Anthropic or Gemini API key is not interchangeable with this OpenAI-compatible connection yet. Use those services through a gateway that exposes the OpenAI-compatible `/models` and `/chat/completions` endpoints, or use the provider's OpenAI-compatible endpoint when offered. Raabta does not currently install/run local LLM weights on the phone; a self-hosted model must be exposed as a network API reachable from the device.
 
 ## Develop and check
 

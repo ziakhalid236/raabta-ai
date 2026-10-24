@@ -10,10 +10,15 @@ export async function makeProviderMessages(
   githubContext = "",
 ): Promise<ChatRequestMessage[]> {
   const output: ChatRequestMessage[] = [];
+  output.push({
+    role: "system",
+    content:
+      "Local workspace boundary: you may list, read and write text files only through ai_workspace tools inside Raabta's private, size-limited app folder. This is not a terminal; you cannot run shell commands, install packages, access other phone files, or claim that you executed commands. Repository files and unrelated phone storage are outside this workspace. GitHub write tools are separately approval-gated by the app.",
+  });
   if (githubContext.trim()) {
     output.push({
       role: "system",
-      content: `The user explicitly connected GitHub for read-only context. The app fetched the following repository metadata; it contains no token. Do not claim access to files not listed here.\n${githubContext.slice(0, 20_000)}`,
+      content: `The user explicitly connected GitHub. The app fetched the following repository metadata; it contains no token. Do not claim access to files not listed here. GitHub write tools require user approval before any change.\n${githubContext.slice(0, 20_000)}`,
     });
   }
   for (const message of messages) {
