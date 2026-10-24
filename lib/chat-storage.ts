@@ -1,0 +1,175 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+export type ChatAttachment = {
+  id: string;
+  kind: "image" | "document" | "research" | "audio";
+  name: string;
+  mimeType: string;
+  uri?: string;
+  sourceUrl?: string;
+  /** Bounded, extracted text for a user-selected document or retrieved source. Never a secret. */
+  extractedText?: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "activity";
+  content: string;
+  createdAt: string;
+  activityStatus?: "working" | "complete" | "failed" | "stopped";
+  attachments?: ChatAttachment[];
+};
+
+export type ChatThread = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+};
+
+export type ChatPreferences = {
+  language: "ur" | "en";
+  endpointUrl: string;
+  modelId: string;
+  transcriptionEndpointUrl: string;
+  transcriptionModelId: string;
+};
+
+const THREADS_KEY = "raabta.chat.threads.v2";
+const LEGACY_THREADS_KEY = "raabta.chat.threads.v1";
+const PREFERENCES_KEY = "raabta.chat.preferences.v2";
+const LEGACY_PREFERENCES_KEY = "raabta.chat.preferences.v1";
+
+export const DEFAULT_PREFERENCES: ChatPreferences = {
+  language: "ur",
+  endpointUrl: "",
+  modelId: "",
+  transcriptionEndpointUrl: "",
+  transcriptionModelId: "",
+};
+
+export async function loadThreads(): Promise<ChatThread[]> {
+  let stored = await AsyncStorage.getItem(THREADS_KEY);
+  let migrate = false;
+  if (!stored) {
+    stored = await AsyncStorage.getItem(LEGACY_THREADS_KEY);
+    migrate = Boolean(stored);
+  }
+  if (!stored) return [];
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    const threads = parsed
+      .filter(isChatThread)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (migrate) await saveThreads(threads);
+    return threads;
+  } catch {
+    return [];
+  }
+}
+
+export async function saveThreads(threads: ChatThread[]): Promise<void> {
+  await AsyncStorage.setItem(THREADS_KEY, JSON.stringify(threads));
+}
+
+export async function loadPreferences(): Promise<ChatPreferences> {
+  let stored = await AsyncStorage.getItem(PREFERENCES_KEY);
+  if (!stored) stored = await AsyncStorage.getItem(LEGACY_PREFERENCES_KEY);
+  if (!stored) return DEFAULT_PREFERENCES;
+  try {
+    const parsed = JSON.parse(stored) as Partial<ChatPreferences>;
+    return {
+      language: parsed.language === "en" ? "en" : "ur",
+      endpointUrl:
+        typeof parsed.endpointUrl === "string" ? parsed.endpointUrl : "",
+      modelId: typeof parsed.modelId === "string" ? parsed.modelId : "",
+      transcriptionEndpointUrl:
+        typeof parsed.transcriptionEndpointUrl === "string"
+          ? parsed.transcriptionEndpointUrl
+          : "",
+      transcriptionModelId:
+        typeof parsed.transcriptionModelId === "string"
+          ? parsed.transcriptionModelId
+          : "",
+    };
+  } catch {
+    return DEFAULT_PREFERENCES;
+  }
+}
+
+export async function savePreferences(
+  preferences: ChatPreferences,
+): Promise<void> {
+  await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+}
+
+export function createThread(now = new Date()): ChatThread {
+  const stamp = now.toISOString();
+  return {
+    id: `thread-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+    title: "New conversation",
+    createdAt: stamp,
+    updatedAt: stamp,
+    messages: [],
+  };
+}
+
+function isChatThread(value: unknown): value is ChatThread {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ChatThread>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.createdAt === "string" &&
+    typeof candidate.updatedAt === "string" &&
+    Array.isArray(candidate.messages) &&
+    candidate.messages.every(isChatMessage)
+  );
+}
+
+function isChatMessage(value: unknown): value is ChatMessage {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ChatMessage>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.content !== "string" ||
+    typeof candidate.createdAt !== "string"
+  )
+    return false;
+  if (candidate.attachments !== undefined) {
+    if (
+      !Array.isArray(candidate.attachments) ||
+      !candidate.attachments.every(isChatAttachment)
+    )
+      return false;
+  }
+  if (candidate.role === "user" || candidate.role === "assistant") return true;
+  return (
+    candidate.role === "activity" &&
+    (candidate.activityStatus === "working" ||
+      candidate.activityStatus === "complete" ||
+      candidate.activityStatus === "failed" ||
+      candidate.activityStatus === "stopped")
+  );
+}
+
+function isChatAttachment(value: unknown): value is ChatAttachment {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<ChatAttachment>;
+  return (
+    typeof item.id === "string" &&
+    (item.kind === "image" ||
+      item.kind === "document" ||
+      item.kind === "research" ||
+      item.kind === "audio") &&
+    typeof item.name === "string" &&
+    typeof item.mimeType === "string" &&
+    (item.uri === undefined || typeof item.uri === "string") &&
+    (item.sourceUrl === undefined || typeof item.sourceUrl === "string") &&
+    (item.extractedText === undefined ||
+      (typeof item.extractedText === "string" &&
+        item.extractedText.length <= 120_000))
+  );
+}
