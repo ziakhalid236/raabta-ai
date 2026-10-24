@@ -900,7 +900,9 @@ export default function HomeScreen() {
               </Text>
             </View>
             <Text numberOfLines={1} style={styles.threadTitle}>
-              {activeThread?.title ?? t("New conversation", "نئی گفتگو")}
+              {activeThread?.title && activeThread.title !== "New conversation"
+                ? activeThread.title
+                : t("New conversation", "نئی گفتگو")}
             </Text>
           </View>
 
@@ -3015,17 +3017,17 @@ const styles = StyleSheet.create({
   },
   toolRailViewport: { height: 48, flexGrow: 0, flexShrink: 0 },
   toolRail: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 9,
     paddingVertical: 5,
-    gap: 7,
+    gap: 4,
     alignItems: "center",
   },
   toolChip: {
-    minHeight: 36,
+    minHeight: 32,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 11,
+    gap: 4,
+    paddingHorizontal: 6,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: C.line,
@@ -3033,7 +3035,7 @@ const styles = StyleSheet.create({
   },
   toolChipActive: { backgroundColor: C.dangerPale, borderColor: "#F1D2CD" },
   toolChipDisabled: { opacity: 0.45 },
-  toolChipText: { color: C.ink, fontSize: 11, fontWeight: "600" },
+  toolChipText: { color: C.ink, fontSize: 10, fontWeight: "600" },
   toolChipTextActive: { color: C.danger },
   attachmentTray: {
     paddingHorizontal: 14,
