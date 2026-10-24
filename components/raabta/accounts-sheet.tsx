@@ -114,7 +114,7 @@ export function AccountsSheet({
 
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>GitHub</Text>
-              <Text style={styles.sectionEyebrow}>{t("PROFILE ONLY", "صرف پروفائل")}</Text>
+              <Text style={styles.sectionEyebrow}>{t("TOOLS ENABLED", "tools فعال")}</Text>
             </View>
             <View style={styles.accountCard}>
               {githubProfile ? (
@@ -140,7 +140,7 @@ export function AccountsSheet({
             {!githubProfile ? (
               <>
                 <Text style={styles.explanation}>
-                  {t("Paste a personal access token to verify your profile. Raabta calls only GitHub’s authenticated profile endpoint; repository access and actions are not enabled.", "پروفائل کی تصدیق کے لیے personal access token درج کریں۔ رابطہ صرف GitHub profile endpoint پڑھتا ہے؛ repository access یا actions فعال نہیں ہیں۔")}
+                  {t("Paste a personal access token to verify your profile. Raabta can read and update repositories through protected app tools; the token is never sent to the AI provider.", "پروفائل کی تصدیق کے لیے personal access token درج کریں۔ رابطہ محفوظ app tools کے ذریعے repositories پر کام کر سکتا ہے؛ token AI کو نہیں بھیجا جاتا۔")}
                 </Text>
                 <View style={styles.tokenWrap}>
                   <TextInput
@@ -166,7 +166,7 @@ export function AccountsSheet({
                   {connecting ? <ActivityIndicator size="small" color={C.white} /> : <Ionicons name="link-outline" size={17} color={C.white} />}
                   <Text style={styles.primaryButtonText}>{connecting ? t("Checking GitHub…", "GitHub کی تصدیق ہو رہی ہے…") : t("Connect GitHub", "GitHub جوڑیں")}</Text>
                 </Pressable>
-                <Text style={styles.scopeNote}>{t("Use the minimum user-profile read permission if GitHub requires it. Do not grant repository access. The token is saved only after the profile check succeeds.", "اگر GitHub اجازت مانگے تو صرف کم سے کم profile read اجازت دیں۔ Repository access نہ دیں۔ token صرف کامیاب پروفائل تصدیق کے بعد محفوظ ہو گا۔")}</Text>
+                <Text style={styles.scopeNote}>{t("Grant only the repository permissions you want Raabta to use. Code edits, commits, issues and pull requests can run autonomously; delete, merge and deploy always require approval. The token is saved only after verification succeeds.", "اگر GitHub اجازت مانگے تو صرف کم سے کم profile read اجازت دیں۔ Repository access نہ دیں۔ token صرف کامیاب پروفائل تصدیق کے بعد محفوظ ہو گا۔")}</Text>
               </>
             ) : (
               <Pressable accessibilityRole="button" onPress={onDisconnectGitHub} style={styles.disconnectButton}>
@@ -186,7 +186,7 @@ export function AccountsSheet({
             </View>
             <View style={styles.futureCard}>
               <Ionicons name="git-network-outline" size={17} color={C.muted} />
-              <Text style={styles.futureText}>{t("Repository tools, YouTube and MCP connections are future work and will need separate permissions and your approval.", "Repository tools، YouTube اور MCP کنکشن مستقبل کے مراحل ہیں؛ ان کے لیے الگ اجازت اور آپ کی منظوری درکار ہو گی۔")}</Text>
+              <Text style={styles.futureText}>{t("GitHub tools can read and update code, create issues and open pull requests. Delete, merge and deploy actions always require your approval.", "Repository tools، YouTube اور MCP کنکشن مستقبل کے مراحل ہیں؛ ان کے لیے الگ اجازت اور آپ کی منظوری درکار ہو گی۔")}</Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
