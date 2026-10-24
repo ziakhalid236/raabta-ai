@@ -55,9 +55,9 @@ pnpm lint
 
 The project uses Expo Router / React Native with local helpers in `lib/`. Native device features must be checked on an actual Android device; a web screenshot is not proof that microphone permissions, SecureStore or picker behavior works on every device.
 
-## Android debug APK
+## Android test APK (self-contained)
 
-The public repository includes `.github/workflows/android-apk.yml`. A push to `main` that changes app/build inputs starts the workflow; you can also open **Actions → Build Android APK → Run workflow** to start it manually. A successful run uploads the installable `app-debug.apk` as the `raabta-ai-debug-apk` artifact for 30 days. Download it from the workflow run's **Artifacts** section. This is a debug/test APK, not a signed Google Play release. The workflow uses Expo prebuild and Gradle on GitHub-hosted runners and does not require an Expo token. Expo Web Preview is not an APK.
+The public repository includes `.github/workflows/android-apk.yml`. A push to `main` that changes app/build inputs starts the workflow; you can also open **Actions → Build Android APK → Run workflow** to start it manually. The workflow runs Expo prebuild and Gradle `assembleRelease`, then verifies that `assets/index.android.bundle` is inside the APK so it does not need a Metro development server. A successful run uploads `app-release.apk` as the `raabta-ai-test-apk` artifact for 30 days. Download it from that workflow run's **Artifacts** section. It is signed with Expo's default Android debug key for sideload testing, not a private Play Store release key; builds from separate clean runners may not update one another over an existing installation. No Expo token is required. Expo Web Preview is not an APK.
 
 ## Open source
 

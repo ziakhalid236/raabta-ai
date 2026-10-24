@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   build-android-apk:
-    name: Build installable Android debug APK
+    name: Build standalone Android test APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -60,15 +60,18 @@ jobs:
 
       - name: Build APK
         working-directory: android
-        run: ./gradlew --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:assembleRelease
 
-      - name: Verify APK exists
-        run: test -s android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify standalone APK and bundled JavaScript
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          unzip -Z1 "$apk" | grep -Fxq "assets/index.android.bundle"
 
-      - name: Upload installable debug APK
+      - name: Upload self-contained Android test APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: raabta-ai-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: raabta-ai-test-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
