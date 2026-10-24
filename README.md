@@ -6,7 +6,7 @@
 
 ### Stage 1 — Chat with your chosen model
 
-Connect one OpenRouter API key, load OpenRouter's model catalog and select a chat model by its displayed name. Raabta stores the selected model's internal ID locally for requests, while normal controls and the Action Timeline show its display name only. You do not type a provider URL or model ID. The catalog request does not send a test prompt or run inference. A catalog listing is not a guarantee that the model is enabled or available to your OpenRouter account. Send a real question to test inference; the selected provider/model may charge for it.
+Connect an API key and an OpenAI-compatible `/v1` base URL (OpenRouter is the default), load the provider's `/models` catalog and select a chat model. Raabta stores the selected model ID locally for requests. Compatible catalogs that expose only an ID use that ID as the display name. The catalog request does not send a test prompt or run inference. A catalog listing does not guarantee the model is enabled for your account. Send a real question to test inference; the selected provider/model may charge for it. The endpoint must implement OpenAI-compatible `GET /models` and `POST /chat/completions` routes.
 
 Start, reopen and resume locally stored conversations, stop an in-flight request, and see real preparation, retrieval, model dispatch, answer, failure and stop events in the persistent Action Timeline. Without a connected key/model or after an API error, Raabta shows an honest setup/error state rather than inventing an answer.
 
@@ -20,31 +20,31 @@ Start, reopen and resume locally stored conversations, stop an in-flight request
 
 ### Stage 3 — Bounded assistant tasks
 
-Web research, source retrieval, local attachment preparation and model answering are explicitly user-triggered workflows. The chat shows each retrieval, preparation, model dispatch, answer, stop or failure as its own compact, persistent timeline event. Current workflows do not take consequential account actions and do not continue in the background while the app is locked.
+Web research, source retrieval, local attachment preparation and model answering are user-triggered workflows. Each live tool action is shown in the persistent Action Timeline. GitHub file commits, issue creation and pull requests require a separate approval prompt before the request is sent. Work does not continue in the background while the app is locked.
 
-### Stage 4 — Accounts: profile-only GitHub
+### Stage 4 — Accounts: permissioned GitHub tools
 
-The GitHub icon in the composer opens **Accounts**. Users may provide their own GitHub personal access token to check the authenticated profile (`GET https://api.github.com/user`). The app saves the token separately from the OpenRouter key only after a successful profile check, and displays the returned login/avatar. This connection does **not** grant or use repository access; Raabta does not read repositories, issues, or commits, and does not perform GitHub writes. Disconnect removes the token from Raabta but does not revoke the token at GitHub. Do not grant repository permissions for this profile-only feature.
+The GitHub icon in the composer opens **Accounts**. Users may provide their own personal access token. Raabta checks the profile and lists repositories visible to that token, and can read repository files. File commits, issue creation and pull requests each require an in-app approval prompt. The token is stored separately from the provider key and is never included in model messages. Grant only the repository permissions you intend to use. Disconnect removes the token from Raabta but does not revoke it at GitHub.
 
-YouTube, MCP servers, GitHub repository tools and other external actions are future work. They require separate least-privilege permissions and explicit user approval before each consequential action. The public source repository is a release mirror, not an in-app account connection.
+YouTube, MCP servers, deleting files, merging pull requests and deployment actions are not available. The public source repository is a release mirror, not an in-app account connection.
 
 ## Privacy and permissions
 
-- On Android, the OpenRouter API key and GitHub profile token are held in separate Expo SecureStore entries. The app does not bundle keys or copy them into messages, chat preferences or Action Timeline records. Browser Preview keeps both credentials in session memory only.
+- On Android, the provider API key and GitHub token are held in separate Expo SecureStore entries. The app does not bundle keys or copy them into messages, chat preferences or Action Timeline records. Browser Preview keeps both credentials in session memory only.
 - Conversation history, action events, non-secret preferences, profile display details and app-copied attachments stay in the local app sandbox through AsyncStorage/app documents. Chat storage is **not separately encrypted by Raabta**; use the device's screen lock.
-- Prompts and any image/document/source/audio selected for a task are transmitted to OpenRouter only when you explicitly run the task. OpenRouter/provider processing, billing and retention policies are outside Raabta's control.
-- A web search query is sent to DuckDuckGo. Retrieved excerpts and links are then included in the OpenRouter request you explicitly initiated.
-- GitHub is contacted only when you press Connect; the profile-only connection calls GitHub's authenticated `/user` endpoint. Disconnect deletes the app's stored credential, not the remote GitHub token.
+- Prompts and any image/document/source/audio selected for a task are transmitted to the configured AI provider only when you explicitly run the task. Provider processing, billing and retention policies are outside Raabta's control.
+- A web search query is sent to DuckDuckGo. Retrieved excerpts and links are then included in the AI-provider request you explicitly initiated.
+- GitHub is contacted when you connect the account or when a tool action is requested. GitHub writes require an approval prompt. Disconnect deletes the app's stored credential, not the remote GitHub token.
 - Android microphone permission is requested only when you start recording. Images and documents are selected through the system picker. Raabta has no sign-in and no cloud chat-sync service.
 
-## Connect OpenRouter
+## Connect an AI provider
 
-1. Create an OpenRouter API key at [openrouter.ai/keys](https://openrouter.ai/keys).
-2. Open **Settings**, paste the key and choose **Connect & load models**. Raabta requests the catalog only; it does not send a billable test prompt. On Android, the key is stored in SecureStore only after the catalog request succeeds.
-3. Choose a chat model by name from the discovered list. Use the image-capable filter if you plan to ask questions about photos. If you use voice, separately choose a transcription model from the transcription catalog.
-4. Send a question when ready. Provider/model access, quotas and charges are determined by OpenRouter and your account. Check the model's current pricing and access before sending sensitive, long or billable content.
+1. For OpenRouter, create a key at [openrouter.ai/keys](https://openrouter.ai/keys). For another provider, use its API key and OpenAI-compatible base URL ending in `/v1`.
+2. Open **Settings**, enter the key and base URL, then choose **Connect & load models**. Raabta requests `/models`; it does not send a test prompt. On Android, the key is stored in SecureStore only after the catalog request succeeds.
+3. Choose a listed chat model. Use the image-capable filter only when the catalog reports image support. Speech transcription is currently cataloged through OpenRouter's transcription endpoint.
+4. Send a question when ready. Provider/model access, quotas and charges depend on your provider. For a self-hosted endpoint, make sure the phone can reach the server; `localhost` on a phone refers to the phone itself, not a computer running the model.
 
-You never need to enter a model ID manually. Existing custom-provider keys from older app versions are not silently sent to OpenRouter; enter the intended OpenRouter key again to connect.
+OpenAI-compatible model lists sometimes return only model IDs; Raabta uses those IDs as their selectable names. Custom servers without a compatible `/models` endpoint are not yet supported by automatic discovery. Existing saved keys are not silently sent to a different provider; enter and connect the intended key explicitly.
 
 ## Develop and check
 

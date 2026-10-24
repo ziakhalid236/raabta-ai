@@ -36,12 +36,12 @@ export async function discoverOpenRouterModels(
 ): Promise<OpenRouterCatalog> {
   const key = apiKey.trim();
   if (!key)
-    throw new OpenRouterCatalogError("Enter an OpenRouter API key first.");
+    throw new OpenRouterCatalogError("Enter the AI provider API key first.");
 
   const chatModels = await fetchModelCollection(key, "text", signal, baseUrl);
   if (!chatModels.length) {
     throw new OpenRouterCatalogError(
-      "OpenRouter returned no text-chat models for this catalog request. Check the key and try again.",
+      "The provider returned no text-chat models for this catalog request. Check the API base URL and key.",
     );
   }
 
@@ -71,8 +71,11 @@ async function fetchModelCollection(
 ): Promise<OpenRouterModel[]> {
   const normalizedBase = baseUrl.replace(/\/$/, "");
   const initial = new URL(`${normalizedBase}/models`);
-  initial.searchParams.set("output_modalities", outputModality);
-  initial.searchParams.set("limit", "1000");
+  const isOpenRouter = new URL(normalizedBase).hostname === "openrouter.ai";
+  if (isOpenRouter) {
+    initial.searchParams.set("output_modalities", outputModality);
+    initial.searchParams.set("limit", "1000");
+  }
   const origin = new URL(normalizedBase).origin;
   let nextUrl: URL | null = initial;
   const models: OpenRouterModel[] = [];
@@ -81,7 +84,7 @@ async function fetchModelCollection(
   for (let page = 0; nextUrl && page < MAX_MODEL_PAGES; page += 1) {
     if (nextUrl.origin !== origin || !nextUrl.pathname.endsWith("/models")) {
       throw new OpenRouterCatalogError(
-        "OpenRouter returned an unexpected model-catalog link.",
+        "The provider returned an unexpected model-catalog link.",
       );
     }
 
@@ -98,7 +101,7 @@ async function fetchModelCollection(
     } catch {
       if (signal?.aborted) throw new Error("Request stopped.");
       throw new OpenRouterCatalogError(
-        "Could not reach OpenRouter. Check your internet connection and try again.",
+        "Could not reach the configured AI provider. Check the base URL and internet connection.",
       );
     }
 
@@ -108,7 +111,7 @@ async function fetchModelCollection(
     const data = envelope?.data;
     if (!Array.isArray(data)) {
       throw new OpenRouterCatalogError(
-        "OpenRouter returned an unreadable model catalog. Please try again.",
+        "The AI provider returned an unreadable model catalog. Please check its OpenAI-compatible /models response.",
       );
     }
 
@@ -128,7 +131,7 @@ async function fetchModelCollection(
         nextUrl = new URL(next, normalizedBase);
       } catch {
         throw new OpenRouterCatalogError(
-          "OpenRouter returned an unreadable pagination link.",
+          "The provider returned an unreadable pagination link.",
         );
       }
     }
@@ -140,19 +143,35 @@ async function fetchModelCollection(
     );
   }
 
-  return models.sort((a, b) => a.name.localeCompare(b.name));
+  const compatibleModels = isOpenRouter
+    ? models
+    : outputModality === "transcription"
+      ? models.filter((model) => model.outputModalities.includes("transcription"))
+      : models.filter(
+          (model) =>
+            model.outputModalities.length === 0 ||
+            model.outputModalities.includes("text"),
+        );
+  return compatibleModels.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function normalizeModel(value: unknown): OpenRouterModel | null {
   const model = asRecord(value);
   if (!model) return null;
   const id = typeof model.id === "string" ? model.id.trim() : "";
-  const name = typeof model.name === "string" ? model.name.trim() : "";
-  if (!id || !name) return null;
+  const reportedName = typeof model.name === "string" ? model.name.trim() : "";
+  if (!id) return null;
+  // Many OpenAI-compatible /models endpoints return only { id, object }.
+  // Keep those models selectable by falling back to the model ID as its label.
+  const name = reportedName || id;
 
   const architecture = asRecord(model?.architecture);
-  const inputModalities = stringArray(architecture?.input_modalities);
-  const outputModalities = stringArray(architecture?.output_modalities);
+  const inputModalities = stringArray(
+    architecture?.input_modalities ?? model.input_modalities,
+  );
+  const outputModalities = stringArray(
+    architecture?.output_modalities ?? model.output_modalities,
+  );
   const pricing = asRecord(model?.pricing);
   const contextLength =
     typeof model?.context_length === "number" &&
@@ -192,14 +211,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function catalogResponseError(status: number): OpenRouterCatalogError {
   const messages: Record<number, string> = {
-    400: "OpenRouter could not read the model request (400). Check the app version and retry.",
-    401: "OpenRouter rejected this API key (401). Check it or enter a new key.",
-    403: "OpenRouter denied access to the model catalog (403). Check the key and account status.",
-    429: "OpenRouter rate-limited the catalog request (429). Wait briefly and refresh.",
+    400: "The provider rejected the model-list request (400). Check that the URL ends in the correct /v1 base path.",
+    401: "The provider rejected this API key (401). Check it or enter a new key.",
+    403: "The provider denied access to the model catalog (403). Check the key and account status.",
+    429: "The provider rate-limited the catalog request (429). Wait briefly and refresh.",
   };
   return new OpenRouterCatalogError(
     messages[status] ??
-      `OpenRouter returned HTTP ${status} while loading models.`,
+      `The configured AI provider returned HTTP ${status} while loading models.`,
     status,
   );
 }

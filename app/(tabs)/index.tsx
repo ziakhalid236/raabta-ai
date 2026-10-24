@@ -8,6 +8,7 @@ import {
 } from "expo-audio";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -437,7 +438,7 @@ export default function HomeScreen() {
             "محفوظ storage میں API key نہیں ملی۔ Settings میں دوبارہ درج کریں۔",
           ),
         );
-      const executeTool = async (
+      const executeToolAction = async (
         name: string,
         args: Record<string, unknown>,
       ): Promise<string> => {
@@ -514,6 +515,89 @@ export default function HomeScreen() {
             }),
           );
         return `Tool ${name} is not available. Delete, merge and deploy are approval-gated and are not autonomous tools.`;
+      };
+      const executeTool = async (
+        name: string,
+        args: Record<string, unknown>,
+      ): Promise<string> => {
+        const repo = typeof args.repository === "string" ? args.repository : "";
+        const path = typeof args.path === "string" ? args.path : "";
+        const labels: Record<string, [string, string]> = {
+          web_search: ["Searching the public web", "عوامی ویب پر تلاش جاری ہے"],
+          read_public_web_page: ["Reading a public web page", "عوامی ویب صفحہ پڑھا جا رہا ہے"],
+          github_list_repositories: ["Listing GitHub repositories", "GitHub repositories دیکھی جا رہی ہیں"],
+          github_list_files: ["Listing repository files", "repository کی فائلیں دیکھی جا رہی ہیں"],
+          github_read_file: ["Reading a repository file", "repository کی فائل پڑھی جا رہی ہے"],
+          github_update_file: ["Preparing a GitHub file update", "GitHub فائل کی تبدیلی تیار ہو رہی ہے"],
+          github_create_issue: ["Preparing a GitHub issue", "GitHub issue تیار ہو رہا ہے"],
+          github_create_pull_request: ["Preparing a GitHub pull request", "GitHub pull request تیار ہو رہی ہے"],
+        };
+        const [englishLabel, urduLabel] = labels[name] ?? [
+          `Running ${name}`,
+          `${name} چل رہا ہے`,
+        ];
+        const suffix = repo ? ` · ${repo}${path ? `/${path}` : ""}` : "";
+        const label = `${t(englishLabel, urduLabel)}${suffix}`;
+        const eventId = makeId("activity");
+        const createdAt = new Date().toISOString();
+        const writeAction =
+          name === "github_update_file" ||
+          name === "github_create_issue" ||
+          name === "github_create_pull_request";
+        updateThread(currentThread.id, (thread) => ({
+          ...thread,
+          updatedAt: createdAt,
+          messages: [
+            ...thread.messages,
+            {
+              id: eventId,
+              role: "activity",
+              content: label,
+              activityStatus: "working",
+              createdAt,
+            },
+          ],
+        }));
+        const finishEvent = (
+          content: string,
+          status: ChatMessage["activityStatus"],
+        ) =>
+          updateThread(currentThread.id, (thread) => ({
+            ...thread,
+            messages: thread.messages.map((message) =>
+              message.id === eventId
+                ? { ...message, content, activityStatus: status }
+                : message,
+            ),
+          }));
+        try {
+          if (writeAction) {
+            const summary =
+              name === "github_update_file"
+                ? `Commit ${path} in ${repo}`
+                : name === "github_create_issue"
+                  ? `Create issue in ${repo}: ${String(args.title ?? "")}`
+                  : `Open pull request in ${repo}: ${String(args.title ?? "")}`;
+            const approved = await requestGitHubActionApproval(summary);
+            if (!approved) {
+              const cancelled = t(
+                "Cancelled by you; no GitHub change was made.",
+                "آپ نے منسوخ کیا؛ GitHub میں کوئی تبدیلی نہیں کی گئی۔",
+              );
+              finishEvent(cancelled, "stopped");
+              return cancelled;
+            }
+          }
+          const result = await executeToolAction(name, args);
+          finishEvent(`${label} — ${t("complete", "مکمل")}`, "complete");
+          return result;
+        } catch (error) {
+          finishEvent(
+            `${label} — ${t("failed", "ناکام")}: ${safeTaskError(error)}`,
+            "failed",
+          );
+          throw error;
+        }
       };
       if (sourceAction) {
         const retrieved = await sourceAction.resolve(controller.signal);
@@ -1025,7 +1109,7 @@ export default function HomeScreen() {
       setGithubProfile(profile);
       setGithubRepositories(repositories);
       setAccountsNotice(
-        `Connected as @${profile.login}. Read-only access verified for ${repositories.length} repositories. The token stays in secure storage and is never sent to the AI provider.`,
+        `Connected as @${profile.login}. ${repositories.length} repositories are visible to this token. Repository actions depend on the token permissions and ask before creating or changing GitHub content.`,
       );
       return true;
     } catch (error) {
@@ -1851,21 +1935,21 @@ export default function HomeScreen() {
               <Ionicons name="sparkles" size={21} color={C.teal} />
             </View>
             <View style={styles.flex}>
-              <Text style={styles.settingsIntroTitle}>OpenRouter</Text>
+              <Text style={styles.settingsIntroTitle}>AI provider</Text>
               <Text style={styles.settingsIntroCopy}>
                 {t(
-                  "Enter one API key. Raabta loads the model catalog; you select the model name.",
-                  "ایک API key درج کریں۔ رابطہ ماڈلز کی فہرست لوڈ کرے گا اور آپ نام سے ماڈل منتخب کریں گے۔",
+                  "Enter an API key and an OpenAI-compatible /v1 base URL. Raabta loads the catalog; you select a model.",
+                  "API key اور OpenAI-compatible /v1 base URL درج کریں۔ رابطہ فہرست لوڈ کرے گا اور آپ ماڈل منتخب کریں گے۔",
                 )}
               </Text>
             </View>
           </View>
 
           <FieldLabel
-            title={t("OpenRouter API key", "OpenRouter API key")}
+            title={t("Provider API key", "Provider API key")}
             subtitle={t(
-              "Stored separately from chats. Connect loads the catalog but does not send a test prompt.",
-              "یہ chats سے الگ محفوظ ہوتی ہے۔ Connect صرف فہرست لوڈ کرتا ہے، آزمائشی پیغام نہیں بھیجتا۔",
+              "Stored separately from chats. Connect loads /models but does not send a test prompt.",
+              "یہ chats سے الگ محفوظ ہوتی ہے۔ Connect صرف /models لوڈ کرتا ہے، آزمائشی پیغام نہیں بھیجتا۔",
             )}
           />
           <FieldLabel
@@ -1887,7 +1971,7 @@ export default function HomeScreen() {
           />
           <View style={styles.keyInputWrap}>
             <TextInput
-              accessibilityLabel="OpenRouter API key"
+              accessibilityLabel="Provider API key"
               autoCapitalize="none"
               autoCorrect={false}
               secureTextEntry={!keyVisible}
@@ -1900,8 +1984,8 @@ export default function HomeScreen() {
                       "key محفوظ ہے · بدلنے کے لیے نئی key درج کریں",
                     )
                   : t(
-                      "Paste your OpenRouter API key",
-                      "اپنی OpenRouter API key درج کریں",
+                      "Paste your provider API key",
+                      "اپنے provider کی API key درج کریں",
                     )
               }
               placeholderTextColor="#9AA29E"
@@ -2784,6 +2868,24 @@ function RoadmapCard({
       </View>
     </View>
   );
+}
+
+function requestGitHubActionApproval(summary: string): Promise<boolean> {
+  const message = `${summary}\n\nThis will change your GitHub account. Continue?`;
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return Promise.resolve(window.confirm(message));
+  }
+  return new Promise((resolve) => {
+    Alert.alert(
+      "Approve GitHub action?",
+      message,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Approve", style: "default", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
 }
 
 function titleFromMessage(message: string): string {

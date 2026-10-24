@@ -188,8 +188,8 @@ export function AccountsSheet({
                 <Text style={styles.serviceDetail}>
                   {githubProfile
                     ? t(
-                        `${repositoryCount} repositories verified for read-only access`,
-                        `${repositoryCount} repositories read-only رسائی کے لیے verified`,
+                        `${repositoryCount} repositories visible to this token`,
+                        `${repositoryCount} repositories اس token کو نظر آتی ہیں`,
                       )
                     : t("No account connected", "کوئی اکاؤنٹ منسلک نہیں")}
                 </Text>
@@ -294,8 +294,8 @@ export function AccountsSheet({
                 </Pressable>
                 <Text style={styles.scopeNote}>
                   {t(
-                    "Grant only the repository permissions you want Raabta to use. Code edits, commits, issues and pull requests can run autonomously; delete, merge and deploy always require approval. The token is saved only after verification succeeds.",
-                    "اگر GitHub اجازت مانگے تو صرف کم سے کم profile read اجازت دیں۔ Repository access نہ دیں۔ token صرف کامیاب پروفائل تصدیق کے بعد محفوظ ہو گا۔",
+                    "Grant only the least permissions you need. Raabta asks for approval before each file commit, issue or pull request. The token is saved only after verification succeeds.",
+                    "صرف کم سے کم ضروری اجازت دیں۔ ہر فائل commit، issue یا pull request سے پہلے رابطہ آپ کی منظوری مانگے گا۔ token کامیاب تصدیق کے بعد محفوظ ہو گا۔",
                   )}
                 </Text>
               </>
@@ -335,8 +335,8 @@ export function AccountsSheet({
               <Ionicons name="git-network-outline" size={17} color={C.muted} />
               <Text style={styles.futureText}>
                 {t(
-                  "GitHub tools can read and update code, create issues and open pull requests. Delete, merge and deploy actions always require your approval.",
-                  "Repository tools، YouTube اور MCP کنکشن مستقبل کے مراحل ہیں؛ ان کے لیے الگ اجازت اور آپ کی منظوری درکار ہو گی۔",
+                  "GitHub tools can read repositories. File commits, issues and pull requests require your approval each time. Delete, merge and deploy are not available.",
+                  "GitHub tools repositories پڑھ سکتے ہیں۔ فائل commit، issue اور pull request کے لیے ہر بار منظوری لازم ہے۔ Delete، merge اور deploy دستیاب نہیں۔",
                 )}
               </Text>
             </View>

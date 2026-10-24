@@ -40,7 +40,9 @@ export async function requestChatCompletion(args: {
 }): Promise<string> {
   const chatUrl = `${(args.baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "")}/chat/completions`;
   const messages = [...args.messages] as Array<Record<string, unknown>>;
-  for (let round = 0; round < 8; round += 1) {
+  const completedToolActions = new Map<string, string>();
+  const maxToolRounds = 8;
+  for (let round = 0; round < maxToolRounds; round += 1) {
     let response: Response;
     try {
       response = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
@@ -61,7 +63,7 @@ export async function requestChatCompletion(args: {
     } catch (error) {
       if (args.signal.aborted) throw error;
       throw new AIRequestError(
-        "Could not reach OpenRouter. Check your internet connection and try again.",
+        "Could not reach the configured AI provider. Check the API base URL and internet connection.",
       );
     }
 
@@ -88,6 +90,7 @@ export async function requestChatCompletion(args: {
         : [];
     if (toolCalls.length && args.executeTool) {
       messages.push(message as Record<string, unknown>);
+      let duplicateActionRequested = false;
       for (const call of toolCalls) {
         const item = call as {
           id?: unknown;
@@ -106,26 +109,86 @@ export async function requestChatCompletion(args: {
         } catch {
           toolArgs = {};
         }
+        const signature = `${name}:${JSON.stringify(toolArgs)}`;
+        const earlierResult = completedToolActions.get(signature);
+        if (earlierResult !== undefined) {
+          duplicateActionRequested = true;
+          messages.push({
+            role: "tool",
+            tool_call_id: id,
+            content:
+              "This exact action was already executed. Do not repeat it; use the earlier result.",
+          });
+          continue;
+        }
         const result = name
           ? await args.executeTool(name, toolArgs)
           : "Unknown tool call.";
+        completedToolActions.set(signature, result);
         messages.push({
           role: "tool",
           tool_call_id: id,
           content: result.slice(0, 40_000),
         });
       }
+      if (duplicateActionRequested) break;
       continue;
     }
     if (!assistantContent) {
       throw new AIRequestError(
-        "The selected OpenRouter model did not return a text answer. Choose another catalog model and try again.",
+        "The selected model did not return a text answer. Check compatibility or choose another model.",
       );
     }
     return assistantContent;
   }
+  // Do not discard successful tool results when a model keeps requesting tools.
+  // Make one final request without tools so the model can summarize what it has.
+  let finalResponse: Response;
+  try {
+    finalResponse = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: args.modelId.trim(),
+        messages: [
+          ...messages,
+          {
+            role: "system",
+            content:
+              "The available tool-action limit has been reached. Do not request more tools. Give the best concise answer using the results already present, and state clearly if something remains incomplete.",
+          },
+        ],
+        tool_choice: "none",
+      }),
+      signal: args.signal,
+    });
+  } catch (error) {
+    if (args.signal.aborted) throw error;
+    throw new AIRequestError(
+      "The task reached its tool-action limit and a final answer could not be reached. Results already shown in the action timeline remain saved.",
+    );
+  }
+  const finalPayload: unknown = await finalResponse.json().catch(() => null);
+  if (!finalResponse.ok) throw responseError(finalResponse.status);
+  const finalChoices =
+    finalPayload && typeof finalPayload === "object"
+      ? (finalPayload as { choices?: unknown }).choices
+      : undefined;
+  const finalFirst = Array.isArray(finalChoices) ? finalChoices[0] : undefined;
+  const finalMessage =
+    finalFirst && typeof finalFirst === "object"
+      ? (finalFirst as { message?: unknown }).message
+      : null;
+  const finalContent =
+    finalMessage && typeof finalMessage === "object"
+      ? extractText((finalMessage as { content?: unknown }).content)
+      : "";
+  if (finalContent) return finalContent;
   throw new AIRequestError(
-    "The model exceeded the maximum live-tool steps. Try a narrower request.",
+    "The task reached its tool-action limit. Some results remain visible in the action timeline, but the model did not produce a final text answer.",
   );
 }
 
@@ -179,10 +242,10 @@ export async function requestAudioTranscription(args: {
 
 function responseError(status: number): AIRequestError {
   const messages: Record<number, string> = {
-    400: "The provider could not accept this request (400). Check model and image/audio compatibility.",
+    400: "The provider could not accept this request (400). Check the model and image compatibility.",
     401: "The provider rejected the API key (401). Check or replace it in Settings.",
     403: "The provider denied this request (403). Check the key's permissions and model access.",
-    404: "OpenRouter could not find the selected model (404). Choose another from the model catalog.",
+    404: "The provider could not find the selected model (404). Choose another from the model catalog.",
     413: "The provider says this image or recording is too large (413). Try a smaller file.",
     429: "The provider rate limit or quota was reached (429). Try again later or check your plan.",
   };
