@@ -12,7 +12,7 @@ Configure your own complete HTTPS OpenAI-compatible Chat Completions URL, model 
 
 - Search public web results using DuckDuckGo's HTML search page. A successful search attaches up to six real source URLs to the chat; search errors return no invented citations.
 - Enter a public HTTPS URL to download and read a bounded text excerpt from HTML, text, JSON or XML, save a `.txt` rendition in app-private documents and ask your configured model about it. Pages over 4 MB are rejected; the model receives at most 35,000 extracted characters. Login-required sites, PDF/binary extraction and private account browsing are not supported.
-- Choose up to four combined image/document attachments from the gallery or system file picker, then send them explicitly in chat. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters. Visual Q&A requires the chosen endpoint/model to support OpenAI-compatible `image_url` content.
+- Choose up to four combined image/document attachments from the gallery or system file picker, then send them explicitly in chat. Chat images appear as compact 80 × 80 previews; tap one to view it full-size. This changes only the display: the selected original image is still sent to the provider. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters. Visual Q&A requires the chosen endpoint/model to support OpenAI-compatible `image_url` content.
 - Record a short voice message after granting microphone permission, or select an audio file. Configure the optional HTTPS audio-transcription endpoint and model in Settings; audio uploads are limited to 20 MB and use the API key stored separately. A transcript is placed in the composer for you to review; Raabta does not send it automatically.
 
 ### Stage 3 — Bounded assistant tasks
@@ -39,7 +39,9 @@ Open **Settings** and enter:
 2. The exact model identifier your provider expects.
 3. Your provider-issued API key.
 
-For voice transcription only, also enter the provider's compatible HTTPS audio transcription endpoint and model. Raabta does not bundle keys, select a provider account, or test a model until you make a request. Image questions require a vision-capable model.
+Settings also include a temporary key show/hide control and an explicit **Test connection** button. The test sends only a short “OK” prompt using the current endpoint/model and saved or draft key. It does not save drafts; press **Save on this device** separately. Your provider may charge for the request.
+
+For voice transcription only, also enter the provider's compatible HTTPS audio transcription endpoint and model. Raabta does not bundle keys or select a provider account. Image questions require a vision-capable model.
 
 ## Develop and check
 
@@ -53,9 +55,9 @@ pnpm lint
 
 The project uses Expo Router / React Native with local helpers in `lib/`. Native device features must be checked on an actual Android device; a web screenshot is not proof that microphone permissions, SecureStore or picker behavior works on every device.
 
-## Android release
+## Android debug APK
 
-The managed Mobile project's Android APK/AAB is built from the project's **Dashboard** after saving an accepted source checkpoint. Expo Web Preview is not an APK. Report a downloadable APK only after the Dashboard build itself succeeds.
+The public repository includes `.github/workflows/android-apk.yml`. A push to `main` that changes app/build inputs starts the workflow; you can also open **Actions → Build Android APK → Run workflow** to start it manually. A successful run uploads the installable `app-debug.apk` as the `raabta-ai-debug-apk` artifact for 30 days. Download it from the workflow run's **Artifacts** section. This is a debug/test APK, not a signed Google Play release. The workflow uses Expo prebuild and Gradle on GitHub-hosted runners and does not require an Expo token. Expo Web Preview is not an APK.
 
 ## Open source
 

@@ -12,6 +12,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -103,6 +104,8 @@ export default function HomeScreen() {
     useState("");
   const [transcriptionModelDraft, setTranscriptionModelDraft] = useState("");
   const [keyDraft, setKeyDraft] = useState("");
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -722,10 +725,73 @@ export default function HomeScreen() {
         "Settings saved on this device. Your API key is stored separately.",
       );
       setShowEmptyKeyHint(false);
+      setKeyVisible(false);
     } catch {
       setSettingsNotice(
         "Could not save securely. Please try again; the API key was not saved to chat history.",
       );
+    }
+  }
+
+  async function testConnection() {
+    if (isTestingConnection) return;
+    const endpointUrl = endpointDraft.trim();
+    const modelId = modelDraft.trim();
+    let apiKey = keyDraft.trim();
+    if (!apiKey) {
+      try {
+        apiKey = (await readApiKey()) ?? "";
+      } catch {
+        setSettingsNotice(
+          t(
+            "Could not read the saved key securely. Try again or enter a new key.",
+            "محفوظ key محفوظ طریقے سے نہیں پڑھی جا سکی۔ دوبارہ کوشش کریں یا نئی key دیں۔",
+          ),
+        );
+        return;
+      }
+    }
+    if (!endpointUrl || !modelId || !apiKey) {
+      setSettingsNotice(
+        t(
+          "Enter an endpoint, model ID and API key before testing.",
+          "ٹیسٹ سے پہلے endpoint، model ID اور API key درج کریں۔",
+        ),
+      );
+      return;
+    }
+    if (!isHttpsUrl(endpointUrl)) {
+      setSettingsNotice(
+        t(
+          "Enter a complete HTTPS chat-completions URL before testing.",
+          "ٹیسٹ سے پہلے مکمل HTTPS chat-completions URL درج کریں۔",
+        ),
+      );
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setSettingsNotice("");
+    try {
+      await requestChatCompletion({
+        endpointUrl,
+        modelId,
+        apiKey,
+        messages: [{ role: "user", content: "Reply with the single word OK." }],
+        signal: new AbortController().signal,
+      });
+      setSettingsNotice(
+        t(
+          "Connection works. Press Save to keep these settings on this device.",
+          "کنکشن درست ہے۔ ان ترتیبات کو فون پر رکھنے کے لیے Save دبائیں۔",
+        ),
+      );
+    } catch (error) {
+      setSettingsNotice(
+        `${t("Connection test failed:", "کنکشن ٹیسٹ ناکام:")} ${safeTaskError(error)}`,
+      );
+    } finally {
+      setIsTestingConnection(false);
     }
   }
 
@@ -749,6 +815,7 @@ export default function HomeScreen() {
       await deleteApiKey();
       setHasKey(false);
       setKeyDraft("");
+      setKeyVisible(false);
       setSettingsNotice("Saved API key removed from secure storage.");
     } catch {
       setSettingsNotice(
@@ -758,6 +825,7 @@ export default function HomeScreen() {
   }
 
   function openSettings() {
+    setKeyVisible(false);
     setEndpointDraft(preferences.endpointUrl);
     setModelDraft(preferences.modelId);
     setTranscriptionEndpointDraft(preferences.transcriptionEndpointUrl);
@@ -862,7 +930,11 @@ export default function HomeScreen() {
               </View>
             ) : activeThread?.messages.length ? (
               activeThread.messages.map((message) => (
-                <MessageRow key={message.id} message={message} />
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  language={preferences.language}
+                />
               ))
             ) : (
               <View style={styles.emptyWelcome}>
@@ -1423,7 +1495,10 @@ export default function HomeScreen() {
             "آپ کا model، آپ کی key، آپ کا اختیار۔",
           )}
           icon="settings-outline"
-          onBack={() => setPanel("chat")}
+          onBack={() => {
+            setPanel("chat");
+            setKeyVisible(false);
+          }}
         >
           <View style={styles.languageCard}>
             <View style={styles.languageCopy}>
@@ -1582,27 +1657,47 @@ export default function HomeScreen() {
               "chat میں نہیں دکھائی جاتی اور گفتگو کے ساتھ محفوظ نہیں ہوتی",
             )}
           />
-          <TextInput
-            accessibilityLabel="API key"
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-            value={keyDraft}
-            onChangeText={setKeyDraft}
-            placeholder={
-              hasKey
-                ? t(
-                    "Saved securely · paste only to replace",
-                    "محفوظ ہے · بدلنے کے لیے نئی key دیں",
-                  )
-                : t(
-                    "Paste your provider API key",
-                    "اپنے provider کی API key درج کریں",
-                  )
-            }
-            placeholderTextColor="#9AA29E"
-            style={[styles.fieldInput, styles.autoDirection]}
-          />
+          <View style={styles.keyInputWrap}>
+            <TextInput
+              accessibilityLabel="API key"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!keyVisible}
+              value={keyDraft}
+              onChangeText={setKeyDraft}
+              placeholder={
+                hasKey
+                  ? t(
+                      "Saved securely · paste only to replace",
+                      "محفوظ ہے · بدلنے کے لیے نئی key دیں",
+                    )
+                  : t(
+                      "Paste your provider API key",
+                      "اپنے provider کی API key درج کریں",
+                    )
+              }
+              placeholderTextColor="#9AA29E"
+              style={[styles.fieldInput, styles.keyInput, styles.autoDirection]}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                keyVisible
+                  ? t("Hide API key", "API key چھپائیں")
+                  : t("Show API key", "API key دکھائیں")
+              }
+              accessibilityState={{ selected: keyVisible, disabled: !keyDraft }}
+              disabled={!keyDraft}
+              onPress={() => setKeyVisible((visible) => !visible)}
+              style={styles.keyVisibilityButton}
+            >
+              <Ionicons
+                name={keyVisible ? "eye-off-outline" : "eye-outline"}
+                size={19}
+                color={keyDraft ? C.teal : C.muted}
+              />
+            </Pressable>
+          </View>
           <View style={styles.keyStatus}>
             <Ionicons
               name={hasKey ? "lock-closed" : "information-circle-outline"}
@@ -1653,6 +1748,34 @@ export default function HomeScreen() {
               )}
             />
           ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isTestingConnection }}
+            disabled={isTestingConnection}
+            onPress={() => void testConnection()}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              isTestingConnection && styles.secondaryButtonDisabled,
+              pressed && !isTestingConnection && styles.pressed,
+            ]}
+          >
+            {isTestingConnection ? (
+              <ActivityIndicator size="small" color={C.teal} />
+            ) : (
+              <Ionicons name="pulse-outline" size={18} color={C.teal} />
+            )}
+            <Text style={styles.secondaryButtonText}>
+              {isTestingConnection
+                ? t("Testing connection…", "کنکشن ٹیسٹ ہو رہا ہے…")
+                : t("Test connection", "کنکشن ٹیسٹ کریں")}
+            </Text>
+          </Pressable>
+          <Text style={[styles.testConnectionNote, styles.autoDirection]}>
+            {t(
+              "Sends a short “OK” prompt to the selected provider. Provider charges may apply.",
+              "منتخب provider کو مختصر “OK” سوال بھیجا جائے گا۔ provider فیس لے سکتا ہے۔",
+            )}
+          </Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => {
@@ -1826,7 +1949,13 @@ function ToolChip({
   );
 }
 
-function MessageRow({ message }: { message: ChatMessage }) {
+function MessageRow({
+  message,
+  language,
+}: {
+  message: ChatMessage;
+  language: "ur" | "en";
+}) {
   if (message.role === "activity") {
     const status = message.activityStatus ?? "complete";
     const icon: IconName =
@@ -1897,12 +2026,11 @@ function MessageRow({ message }: { message: ChatMessage }) {
           <View style={styles.messageAttachments}>
             {message.attachments.map((attachment) =>
               attachment.kind === "image" && attachment.uri ? (
-                <Image
+                <ImagePreview
                   key={attachment.id}
-                  source={{ uri: attachment.uri }}
-                  accessibilityLabel={`Attached image: ${attachment.name}`}
-                  resizeMode="cover"
-                  style={styles.messageImage}
+                  uri={attachment.uri}
+                  name={attachment.name}
+                  language={language}
                 />
               ) : (
                 <Pressable
@@ -1948,6 +2076,75 @@ function MessageRow({ message }: { message: ChatMessage }) {
         </Text>
       </View>
     </View>
+  );
+}
+
+function ImagePreview({
+  uri,
+  name,
+  language,
+}: {
+  uri: string;
+  name: string;
+  language: "ur" | "en";
+}) {
+  const [visible, setVisible] = useState(false);
+  const isUrdu = language === "ur";
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          isUrdu ? `تصویر دیکھیں: ${name}` : `Preview image: ${name}`
+        }
+        onPress={() => setVisible(true)}
+        style={styles.imageThumbButton}
+      >
+        <Image
+          source={{ uri }}
+          accessibilityLabel={name}
+          resizeMode="cover"
+          style={styles.messageImage}
+        />
+        <View pointerEvents="none" style={styles.thumbnailExpandBadge}>
+          <Ionicons name="expand-outline" size={13} color={C.white} />
+        </View>
+      </Pressable>
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVisible(false)}
+      >
+        <View style={styles.previewModal} accessibilityViewIsModal>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              isUrdu ? "تصویر بند کریں" : "Close image preview"
+            }
+            onPress={() => setVisible(false)}
+            style={styles.previewDismissLayer}
+          />
+          <Image
+            source={{ uri }}
+            accessibilityLabel={name}
+            resizeMode="contain"
+            style={styles.previewImage}
+          />
+          <Text numberOfLines={2} style={styles.previewImageName}>
+            {name}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isUrdu ? "بند کریں" : "Close"}
+            onPress={() => setVisible(false)}
+            style={styles.previewCloseButton}
+          >
+            <Ionicons name="close" size={23} color={C.white} />
+          </Pressable>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -2729,6 +2926,21 @@ const styles = StyleSheet.create({
     color: C.ink,
     fontSize: 13,
   },
+  keyInputWrap: {
+    width: "100%",
+    justifyContent: "center",
+    position: "relative",
+  },
+  keyInput: { paddingRight: 54 },
+  keyVisibilityButton: {
+    position: "absolute",
+    right: 7,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   keyStatus: {
     flexDirection: "row",
     alignItems: "center",
@@ -2772,6 +2984,27 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: C.white, fontSize: 14, fontWeight: "700" },
   primaryButtonDisabled: { backgroundColor: "#AFC5BF", opacity: 0.75 },
+  secondaryButton: {
+    minHeight: 46,
+    flexDirection: "row",
+    gap: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#BFD7D1",
+    backgroundColor: C.white,
+  },
+  secondaryButtonDisabled: { opacity: 0.65 },
+  secondaryButtonText: { color: C.tealDark, fontSize: 13, fontWeight: "700" },
+  testConnectionNote: {
+    color: C.muted,
+    fontSize: 10,
+    lineHeight: 15,
+    textAlign: "center",
+    paddingHorizontal: 9,
+    marginTop: -5,
+  },
   researchCard: {
     padding: 14,
     gap: 11,
@@ -2819,12 +3052,70 @@ const styles = StyleSheet.create({
     backgroundColor: C.tealPale,
   },
   pendingAttachmentText: { flexShrink: 1, color: C.tealDark, fontSize: 10 },
-  messageAttachments: { gap: 7, marginTop: 9 },
-  messageImage: {
-    width: 190,
-    height: 128,
+  messageAttachments: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 9,
+  },
+  imageThumbButton: {
+    width: 80,
+    height: 80,
+    position: "relative",
+    overflow: "hidden",
     borderRadius: 12,
     backgroundColor: C.white,
+  },
+  messageImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 12,
+    backgroundColor: C.white,
+  },
+  thumbnailExpandBadge: {
+    position: "absolute",
+    right: 5,
+    bottom: 5,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(32,42,40,0.78)",
+  },
+  previewModal: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    backgroundColor: "rgba(16,26,24,0.96)",
+  },
+  previewDismissLayer: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  previewImage: { width: "100%", height: "70%" },
+  previewImageName: {
+    maxWidth: "84%",
+    marginTop: 16,
+    color: C.white,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  previewCloseButton: {
+    position: "absolute",
+    top: 48,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.15)",
   },
   messageAttachmentChip: {
     alignSelf: "flex-start",

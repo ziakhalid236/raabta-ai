@@ -4,7 +4,7 @@
 
 Raabta AI ایک Android-first موبائل ایپ ہے جس میں صارف اپنے AI provider/model کو خود configure کرے۔ ڈیزائن ہلکا، پریمیم، یک ہاتھ سے قابلِ استعمال اور Urdu/English-friendly رہے۔ Chat history اور action history فون کے app sandbox میں مقامی رہے؛ login، Raabta account یا cloud chat sync درکار نہ ہو۔ کام مرحلہ وار بڑھانا ہے: AI chat، منتخب web/file/image/voice tools، محدود assistant workflows، پھر کبھی explicit permission والے account/tool agents۔ ہر action حقیقی ہو، chat میں چھوٹے timeline event کی صورت نظر آئے، اور موجود نہ ہونے والی صلاحیت کو فعال نہ بتایا جائے۔
 
-صارف کی تازہ ضروریات میں OpenAI-compatible open-source موبائل بنیاد reuse کرنا، بہترین UI، public open-source source release، Android APK build، اور کام کی ہر حقیقی پیش رفت دکھانا شامل ہیں۔ Mobile starter کا canonical source Manus-managed ہی رہے گا؛ GitHub کے لیے secret-scrubbed public snapshot الگ تیار ہو گا۔ APK صرف اصل Dashboard build کے کامیاب نتیجے کے بعد deliver ہو گا۔
+صارف کی تازہ ضروریات میں OpenAI-compatible open-source موبائل بنیاد reuse کرنا، بہترین UI، public open-source source release، GitHub Actions سے Android APK build، اور کام کی ہر حقیقی پیش رفت دکھانا شامل ہیں۔ Mobile starter کا canonical source Manus-managed ہی رہے گا؛ GitHub کے لیے secret-scrubbed public snapshot الگ ہے۔ `.github/workflows/android-apk.yml` public repo میں pnpm lockfile install، Expo Android prebuild، Gradle `assembleDebug` اور 30 دن کے APK artifact upload کی قابلِ تکرار pipeline فراہم کرے گا۔ اصل APK صرف workflow کی کامیابی اور artifact download کے بعد deliver ہو گا۔
 
 ## موجودہ قابلِ استعمال scope
 
@@ -23,7 +23,7 @@ Raabta AI ایک Android-first موبائل ایپ ہے جس میں صارف ا�
 
 - DuckDuckGo public HTML سے محدود web search؛ اصل source URL/title محفوظ، chat میں tappable links؛ search failure پر کوئی نتیجہ ایجاد نہ ہو۔
 - Public HTTPS HTML/text/JSON/XML صفحات کو fetch کر کے bounded text excerpt app documents میں `.txt` صورت محفوظ کریں اور صرف صارف کے task run کرنے پر اس excerpt کو configured model کے ساتھ بھیجیں۔ Login-required pages، PDF/binary parsing اور نجی account browsing شامل نہیں۔
-- Gallery یا document picker میں صارف کے منتخب کردہ زیادہ سے زیادہ چار queued inputs؛ images کو OpenAI-compatible `image_url` data URL صورت میں اور منتخب text/Markdown/CSV/JSON/XML/HTML files کو bounded text context صورت میں بھیجیں۔ Image کے لیے provider کا vision model درکار ہے۔
+- Gallery یا document picker میں صارف کے منتخب کردہ زیادہ سے زیادہ چار queued inputs؛ images کو chat میں 80 × 80 compact thumbnails کی صورت دکھائیں، tap پر full-size modal preview کھولیں، مگر model کو اصل منتخب image ہی بھیجیں۔ Images کو OpenAI-compatible `image_url` data URL صورت میں اور منتخب text/Markdown/CSV/JSON/XML/HTML files کو bounded text context صورت میں بھیجیں۔ Image کے لیے provider کا vision model درکار ہے۔
 - Voice صرف صارف کے اختیار سے: microphone permission record دبانے کے بعد، یا الگ audio-file picker؛ optional HTTPS `/audio/transcriptions` endpoint/model اور موجود secure key؛ زیادہ سے زیادہ 20 MB؛ transcript send سے پہلے composer میں review کے لیے آئے۔ کامیاب transcription کے بعد temporary audio copy حذف ہو۔
 
 ### Stage 3 — محدود، واضح assistant workflows
@@ -38,7 +38,7 @@ GitHub/YouTube یا دیگر account connections، OAuth، MCP/tool server integ
 
 ## موجودہ project structure
 
-- `app/`: Expo Router shell اور React Native UI؛ chat, history, roadmap, research/media, settings.
+- `app/`: Expo Router shell اور React Native UI؛ chat, history, roadmap, research/media, settings, temporary API-key reveal toggle, explicit provider-test action, compact image/lightbox preview.
 - `lib/chat-storage.ts`: versioned local thread, message, attachment, activity اور non-secret preference schemas.
 - `lib/secure-credentials.ts`: native SecureStore اور Web Preview session-memory key adapter.
 - `lib/ai-client.ts`: provider-neutral HTTPS text/image request، optional multipart audio transcription، cancellation اور sanitized provider errors.
@@ -46,6 +46,7 @@ GitHub/YouTube یا دیگر account connections، OAuth، MCP/tool server integ
 - `lib/mobile-media.ts`, `lib/audio-tools.ts`, `lib/web-tools.ts`: permission-on-demand pickers, bounded local text/image/audio preparation، public HTTPS search/download/read.
 - `components/`, `hooks/`, `server/`, `drizzle/`, `shared/`: موجود fixed managed Expo Mobile starter foundations؛ Raabta chat خود login/backend کا تقاضا نہیں کرتی.
 - `assets/images/`, `scripts/generate_brand_assets.py`: original paired-arc Raabta identity اور reproducible native Android/web icon, splash variants.
+- `.github/workflows/android-apk.yml`: pinned GitHub Actions workflow for Expo prebuild → Gradle debug APK → 30-day downloadable artifact (no EAS token).
 - `README.md`, `LICENSE`, `TODO.md`: bilingual open-source handoff, actual support boundaries, MIT license, deliverables.
 
 ## Design direction
@@ -75,4 +76,4 @@ GitHub/YouTube یا دیگر account connections، OAuth، MCP/tool server integ
 
 Provider account/API key اس task میں نہیں دیا گیا، اس لیے production-model success verify نہیں۔ Provider compatibility، rate limit، billing، retention اور vision/audio support provider پر منحصر ہیں۔ AsyncStorage app sandbox-local ہے، الگ سے encrypted نہیں؛ key الگ SecureStore میں۔ Web Preview browsers external CORS کی پابندی لگا سکتے ہیں؛ target Android native ہے۔ Files کے supported formats/size limits UI اور README میں صاف بتائے جائیں۔
 
-Source کو public GitHub repo میں export کرنا الگ external release action ہے؛ پہلے tracked/untracked payload کو secret-scan کریں اور اصل Manus-managed repository کو تبدیل نہ کریں۔ Mobile Android APK/AAB کے لیے Dashboard build استعمال ہوتا ہے؛ Sandbox/Metro/Web screenshot APK نہیں۔ GitHub publication یا Android artifact کی تکمیل صرف returned successful result کے بعد درج ہو گی۔
+Public GitHub source export الگ external action ہے؛ source snapshot secret-scrubbed ہونا چاہیے اور Manus-managed canonical repository تبدیل نہ ہو۔ Android test APK public repo کے GitHub Actions workflow سے بنتا ہے؛ Expo prebuild اور GitHub workflow logs success دکھائیں اور downloadable artifact واقعاً دستیاب ہو، تبھی APK deliverable مکمل شمار ہو گا۔ یہ debug APK ہے، Play Store release signing نہیں۔ Sandbox/Metro/Web screenshot APK نہیں۔
