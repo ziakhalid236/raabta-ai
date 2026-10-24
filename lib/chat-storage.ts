@@ -106,15 +106,16 @@ export async function loadPreferences(): Promise<ChatPreferences> {
     return {
       language: data.language === "ur" ? "ur" : "en",
       // Old custom-provider keys/model IDs must be explicitly reconnected to OpenRouter.
-      openRouterConnected:
-        isCurrentSchema && data.openRouterConnected === true,
-      providerBaseUrl: isCurrentSchema && typeof data.providerBaseUrl === "string" && data.providerBaseUrl.trim()
-        ? data.providerBaseUrl.trim().replace(/\/$/, "")
-        : "https://openrouter.ai/api/v1",
+      openRouterConnected: isCurrentSchema && data.openRouterConnected === true,
+      providerBaseUrl:
+        isCurrentSchema &&
+        typeof data.providerBaseUrl === "string" &&
+        data.providerBaseUrl.trim()
+          ? data.providerBaseUrl.trim().replace(/\/$/, "")
+          : "https://openrouter.ai/api/v1",
       modelId: isCurrentSchema ? stringValue(data.modelId) : "",
       modelName: isCurrentSchema ? stringValue(data.modelName) : "",
-      modelSupportsImages:
-        isCurrentSchema && data.modelSupportsImages === true,
+      modelSupportsImages: isCurrentSchema && data.modelSupportsImages === true,
       transcriptionModelId: isCurrentSchema
         ? stringValue(data.transcriptionModelId)
         : "",
@@ -125,7 +126,9 @@ export async function loadPreferences(): Promise<ChatPreferences> {
       githubAvatarUrl: isCurrentSchema
         ? safeHttpsString(data.githubAvatarUrl)
         : "",
-      githubRepositories: isCurrentSchema ? stringValue(data.githubRepositories) : "",
+      githubRepositories: isCurrentSchema
+        ? stringValue(data.githubRepositories)
+        : "",
     };
   } catch {
     return DEFAULT_PREFERENCES;

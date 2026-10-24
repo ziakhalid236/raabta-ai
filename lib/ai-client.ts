@@ -3,12 +3,20 @@ export type ChatContentPart =
   | { type: "image_url"; image_url: { url: string } };
 
 export type ChatRequestMessage = {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[];
+  tool_call_id?: string;
+  tool_calls?: unknown[];
 };
+export type ChatToolCallExecutor = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<string>;
 
-const DEFAULT_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-const AUDIO_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
+const DEFAULT_CHAT_COMPLETIONS_URL =
+  "https://openrouter.ai/api/v1/chat/completions";
+const AUDIO_TRANSCRIPTIONS_URL =
+  "https://openrouter.ai/api/v1/audio/transcriptions";
 
 export class AIRequestError extends Error {
   constructor(
@@ -27,50 +35,98 @@ export async function requestChatCompletion(args: {
   messages: ChatRequestMessage[];
   signal: AbortSignal;
   baseUrl?: string;
+  tools?: unknown[];
+  executeTool?: ChatToolCallExecutor;
 }): Promise<string> {
   const chatUrl = `${(args.baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "")}/chat/completions`;
-  let response: Response;
-  try {
-    response = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${args.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: args.modelId.trim(),
-        messages: args.messages,
-      }),
-      signal: args.signal,
-    });
-  } catch (error) {
-    if (args.signal.aborted) throw error;
-    throw new AIRequestError(
-      "Could not reach OpenRouter. Check your internet connection and try again.",
-    );
-  }
+  const messages = [...args.messages] as Array<Record<string, unknown>>;
+  for (let round = 0; round < 8; round += 1) {
+    let response: Response;
+    try {
+      response = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${args.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: args.modelId.trim(),
+          messages,
+          ...(args.tools?.length && args.executeTool
+            ? { tools: args.tools, tool_choice: "auto" }
+            : {}),
+        }),
+        signal: args.signal,
+      });
+    } catch (error) {
+      if (args.signal.aborted) throw error;
+      throw new AIRequestError(
+        "Could not reach OpenRouter. Check your internet connection and try again.",
+      );
+    }
 
-  const payload: unknown = await response.json().catch(() => null);
-  if (!response.ok) throw responseError(response.status);
-  const choices =
-    payload && typeof payload === "object"
-      ? (payload as { choices?: unknown }).choices
-      : undefined;
-  const first = Array.isArray(choices) ? choices[0] : undefined;
-  const message =
-    first && typeof first === "object"
-      ? (first as { message?: unknown }).message
-      : null;
-  const answer =
-    message && typeof message === "object"
-      ? extractText((message as { content?: unknown }).content)
-      : "";
-  if (!answer) {
-    throw new AIRequestError(
-      "The selected OpenRouter model did not return a text answer. Choose another catalog model and try again.",
-    );
+    const payload: unknown = await response.json().catch(() => null);
+    if (!response.ok) throw responseError(response.status);
+    const choices =
+      payload && typeof payload === "object"
+        ? (payload as { choices?: unknown }).choices
+        : undefined;
+    const first = Array.isArray(choices) ? choices[0] : undefined;
+    const message =
+      first && typeof first === "object"
+        ? (first as { message?: unknown }).message
+        : null;
+    const assistantContent =
+      message && typeof message === "object"
+        ? extractText((message as { content?: unknown }).content)
+        : "";
+    const toolCalls =
+      message &&
+      typeof message === "object" &&
+      Array.isArray((message as { tool_calls?: unknown }).tool_calls)
+        ? (message as { tool_calls: unknown[] }).tool_calls
+        : [];
+    if (toolCalls.length && args.executeTool) {
+      messages.push(message as Record<string, unknown>);
+      for (const call of toolCalls) {
+        const item = call as {
+          id?: unknown;
+          function?: { name?: unknown; arguments?: unknown };
+        };
+        const id = typeof item.id === "string" ? item.id : "tool-call";
+        const name =
+          typeof item.function?.name === "string" ? item.function.name : "";
+        let toolArgs: Record<string, unknown> = {};
+        try {
+          toolArgs = JSON.parse(
+            typeof item.function?.arguments === "string"
+              ? item.function.arguments
+              : "{}",
+          );
+        } catch {
+          toolArgs = {};
+        }
+        const result = name
+          ? await args.executeTool(name, toolArgs)
+          : "Unknown tool call.";
+        messages.push({
+          role: "tool",
+          tool_call_id: id,
+          content: result.slice(0, 40_000),
+        });
+      }
+      continue;
+    }
+    if (!assistantContent) {
+      throw new AIRequestError(
+        "The selected OpenRouter model did not return a text answer. Choose another catalog model and try again.",
+      );
+    }
+    return assistantContent;
   }
-  return answer;
+  throw new AIRequestError(
+    "The model exceeded the maximum live-tool steps. Try a narrower request.",
+  );
 }
 
 /** Send a user-selected or recorded audio file to OpenRouter speech transcription. */
@@ -85,7 +141,11 @@ export async function requestAudioTranscription(args: {
   const upload =
     args.file.webFile !== undefined
       ? args.file.webFile
-      : ({ uri: args.file.uri, name: args.file.name, type: args.file.mimeType } as unknown as Blob);
+      : ({
+          uri: args.file.uri,
+          name: args.file.name,
+          type: args.file.mimeType,
+        } as unknown as Blob);
   form.append("file", upload, args.file.name);
 
   let response: Response;
@@ -105,11 +165,15 @@ export async function requestAudioTranscription(args: {
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) throw responseError(response.status);
   const text =
-    payload && typeof payload === "object" &&
+    payload &&
+    typeof payload === "object" &&
     typeof (payload as { text?: unknown }).text === "string"
       ? (payload as { text: string }).text.trim()
       : "";
-  if (!text) throw new AIRequestError("OpenRouter returned no readable transcription text. Check the selected speech model.");
+  if (!text)
+    throw new AIRequestError(
+      "OpenRouter returned no readable transcription text. Check the selected speech model.",
+    );
   return text;
 }
 

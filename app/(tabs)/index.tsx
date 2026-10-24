@@ -34,6 +34,7 @@ import {
   requestAudioTranscription,
   requestChatCompletion,
 } from "@/lib/ai-client";
+import { LIVE_TOOL_DEFINITIONS } from "@/lib/ai-tools";
 import {
   createThread,
   DEFAULT_PREFERENCES,
@@ -54,9 +55,21 @@ import {
   writeGitHubToken,
   writeApiKey,
 } from "@/lib/secure-credentials";
-import { discoverOpenRouterModels, type OpenRouterCatalog, type OpenRouterModel } from "@/lib/openrouter";
+import {
+  discoverOpenRouterModels,
+  type OpenRouterCatalog,
+  type OpenRouterModel,
+} from "@/lib/openrouter";
 import { fetchGitHubProfile, type GitHubProfile } from "@/lib/github-account";
-import { listGitHubRepositories, type GitHubRepository } from "@/lib/github-tools";
+import {
+  createGitHubIssue,
+  createGitHubPullRequest,
+  listGitHubRepositories,
+  listGitHubRepositoryFiles,
+  readGitHubFile,
+  updateGitHubFile,
+  type GitHubRepository,
+} from "@/lib/github-tools";
 import { AttachmentSheet } from "@/components/raabta/attachment-sheet";
 import { AccountsSheet } from "@/components/raabta/accounts-sheet";
 import { ModelPicker } from "@/components/raabta/model-picker";
@@ -105,10 +118,36 @@ const assistantMarkdownStyle: MarkdownStyle = {
   h3: { fontSize: 16, fontWeight: "700", color: C.ink, marginBottom: 6 },
   link: { color: C.teal, underline: true },
   code: { color: C.tealDark, backgroundColor: "#EDF3F0" },
-  codeBlock: { fontSize: 12, color: "#E7F1EE", backgroundColor: "#253330", padding: 12, borderRadius: 12, marginBottom: 12 },
-  blockquote: { borderColor: C.teal, backgroundColor: "#F0F6F3", borderRadius: 10, padding: 9, marginBottom: 10 },
-  list: { fontSize: 15, bulletColor: C.teal, markerColor: C.teal, gapWidth: 8, marginLeft: 18 },
-  table: { fontSize: 12, borderColor: C.line, borderRadius: 10, headerBackgroundColor: "#EDF3F0", cellPaddingHorizontal: 8, cellPaddingVertical: 6 },
+  codeBlock: {
+    fontSize: 12,
+    color: "#E7F1EE",
+    backgroundColor: "#253330",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  blockquote: {
+    borderColor: C.teal,
+    backgroundColor: "#F0F6F3",
+    borderRadius: 10,
+    padding: 9,
+    marginBottom: 10,
+  },
+  list: {
+    fontSize: 15,
+    bulletColor: C.teal,
+    markerColor: C.teal,
+    gapWidth: 8,
+    marginLeft: 18,
+  },
+  table: {
+    fontSize: 12,
+    borderColor: C.line,
+    borderRadius: 10,
+    headerBackgroundColor: "#EDF3F0",
+    cellPaddingHorizontal: 8,
+    cellPaddingVertical: 6,
+  },
 };
 
 export default function HomeScreen() {
@@ -128,11 +167,19 @@ export default function HomeScreen() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const [openRouterConnected, setOpenRouterConnected] = useState(false);
-  const [modelCatalog, setModelCatalog] = useState<OpenRouterCatalog | null>(null);
-  const [modelPickerKind, setModelPickerKind] = useState<"chat" | "transcription" | null>(null);
+  const [modelCatalog, setModelCatalog] = useState<OpenRouterCatalog | null>(
+    null,
+  );
+  const [modelPickerKind, setModelPickerKind] = useState<
+    "chat" | "transcription" | null
+  >(null);
   const [accountsVisible, setAccountsVisible] = useState(false);
-  const [githubProfile, setGithubProfile] = useState<GitHubProfile | null>(null);
-  const [githubRepositories, setGithubRepositories] = useState<GitHubRepository[]>([]);
+  const [githubProfile, setGithubProfile] = useState<GitHubProfile | null>(
+    null,
+  );
+  const [githubRepositories, setGithubRepositories] = useState<
+    GitHubRepository[]
+  >([]);
   const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
   const [accountsNotice, setAccountsNotice] = useState("");
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
@@ -169,12 +216,13 @@ export default function HomeScreen() {
     let active = true;
     async function hydrate() {
       try {
-        const [storedThreads, storedPreferences, apiKey, githubToken] = await Promise.all([
-          loadThreads(),
-          loadPreferences(),
-          readApiKey(),
-          readGitHubToken(),
-        ]);
+        const [storedThreads, storedPreferences, apiKey, githubToken] =
+          await Promise.all([
+            loadThreads(),
+            loadPreferences(),
+            readApiKey(),
+            readGitHubToken(),
+          ]);
         if (!active) return;
         const hydratedThreads = storedThreads.length
           ? storedThreads
@@ -197,7 +245,9 @@ export default function HomeScreen() {
             : null,
         );
         try {
-          const saved = JSON.parse(storedPreferences.githubRepositories || "[]");
+          const saved = JSON.parse(
+            storedPreferences.githubRepositories || "[]",
+          );
           setGithubRepositories(Array.isArray(saved) ? saved : []);
         } catch {
           setGithubRepositories([]);
@@ -288,7 +338,9 @@ export default function HomeScreen() {
       return;
     }
 
-    const chatDisplayName = preferences.modelName.trim() || t("your selected model", "آپ کا منتخب ماڈل");
+    const chatDisplayName =
+      preferences.modelName.trim() ||
+      t("your selected model", "آپ کا منتخب ماڈل");
     let currentThread = activeThread;
     if (!currentThread) {
       currentThread = createThread();
@@ -385,6 +437,84 @@ export default function HomeScreen() {
             "محفوظ storage میں API key نہیں ملی۔ Settings میں دوبارہ درج کریں۔",
           ),
         );
+      const executeTool = async (
+        name: string,
+        args: Record<string, unknown>,
+      ): Promise<string> => {
+        if (name === "web_search")
+          return JSON.stringify(
+            await searchWeb(String(args.query ?? text), controller.signal),
+          );
+        if (name === "read_public_web_page")
+          return JSON.stringify(
+            await downloadReadablePage(
+              String(args.url ?? ""),
+              controller.signal,
+            ),
+          );
+        const githubToken = await readGitHubToken();
+        if (!githubToken)
+          return "GitHub is not connected in this app. Ask the user to connect it first.";
+        if (name === "github_list_repositories")
+          return JSON.stringify(
+            await listGitHubRepositories(githubToken, controller.signal),
+          );
+        if (name === "github_list_files")
+          return JSON.stringify(
+            await listGitHubRepositoryFiles(
+              githubToken,
+              String(args.repository),
+              typeof args.path === "string" ? args.path : "",
+              typeof args.branch === "string" ? args.branch : undefined,
+              controller.signal,
+            ),
+          );
+        if (name === "github_read_file")
+          return JSON.stringify({
+            content: await readGitHubFile(
+              githubToken,
+              String(args.repository),
+              String(args.path),
+              typeof args.branch === "string" ? args.branch : undefined,
+              controller.signal,
+            ),
+          });
+        if (name === "github_update_file")
+          return JSON.stringify(
+            await updateGitHubFile({
+              token: githubToken,
+              repository: String(args.repository),
+              path: String(args.path),
+              content: String(args.content),
+              message: String(args.message),
+              branch: typeof args.branch === "string" ? args.branch : undefined,
+              signal: controller.signal,
+            }),
+          );
+        if (name === "github_create_issue")
+          return JSON.stringify(
+            await createGitHubIssue({
+              token: githubToken,
+              repository: String(args.repository),
+              title: String(args.title),
+              body: String(args.body),
+              signal: controller.signal,
+            }),
+          );
+        if (name === "github_create_pull_request")
+          return JSON.stringify(
+            await createGitHubPullRequest({
+              token: githubToken,
+              repository: String(args.repository),
+              title: String(args.title),
+              body: String(args.body),
+              head: String(args.head),
+              base: String(args.base),
+              signal: controller.signal,
+            }),
+          );
+        return `Tool ${name} is not available. Delete, merge and deploy are approval-gated and are not autonomous tools.`;
+      };
       if (sourceAction) {
         const retrieved = await sourceAction.resolve(controller.signal);
         if (controller.signal.aborted) throw new Error("Request stopped.");
@@ -414,7 +544,12 @@ export default function HomeScreen() {
           ...thread,
           messages: thread.messages.map((message) =>
             message.id === userMessage.id
-              ? { ...message, attachments: retrieved.map((source) => sourceToAttachment(source)) }
+              ? {
+                  ...message,
+                  attachments: retrieved.map((source) =>
+                    sourceToAttachment(source),
+                  ),
+                }
               : message,
           ),
         }));
@@ -439,6 +574,8 @@ export default function HomeScreen() {
         messages: providerMessages,
         signal: controller.signal,
         baseUrl: preferences.providerBaseUrl,
+        tools: LIVE_TOOL_DEFINITIONS,
+        executeTool,
       });
       const assistantMessage: ChatMessage = {
         id: makeId("message"),
@@ -540,11 +677,7 @@ export default function HomeScreen() {
   }
 
   async function transcribeAudioFile(file: LocalAudioFile) {
-    if (
-      !openRouterConnected ||
-      !preferences.transcriptionModelId ||
-      !hasKey
-    ) {
+    if (!openRouterConnected || !preferences.transcriptionModelId || !hasKey) {
       setShowError(
         t(
           "Connect OpenRouter and choose a transcription model in Settings before using voice input.",
@@ -560,7 +693,9 @@ export default function HomeScreen() {
       setShowError(safeTaskError(error));
       return;
     }
-    const transcriptionDisplayName = preferences.transcriptionModelName.trim() || t("the selected transcription model", "منتخب transcription ماڈل");
+    const transcriptionDisplayName =
+      preferences.transcriptionModelName.trim() ||
+      t("the selected transcription model", "منتخب transcription ماڈل");
     let currentThread = activeThread;
     if (!currentThread) {
       currentThread = createThread();
@@ -752,7 +887,9 @@ export default function HomeScreen() {
       try {
         candidateKey = (await readApiKey()) ?? "";
       } catch {
-        setSettingsNotice("Could not read the saved key securely. Try again or paste a new OpenRouter key.");
+        setSettingsNotice(
+          "Could not read the saved key securely. Try again or paste a new OpenRouter key.",
+        );
         return;
       }
     }
@@ -769,10 +906,22 @@ export default function HomeScreen() {
     setIsTestingConnection(true);
     setSettingsNotice("");
     try {
-      const providerBaseUrl = (providerBaseUrlDraft.trim() || preferences.providerBaseUrl || "https://openrouter.ai/api/v1").replace(/\/$/, "");
-      const catalog = await discoverOpenRouterModels(candidateKey, undefined, providerBaseUrl);
-      const selectedChat = catalog.chatModels.find((model) => model.id === preferences.modelId);
-      const selectedVoice = catalog.transcriptionModels.find((model) => model.id === preferences.transcriptionModelId);
+      const providerBaseUrl = (
+        providerBaseUrlDraft.trim() ||
+        preferences.providerBaseUrl ||
+        "https://openrouter.ai/api/v1"
+      ).replace(/\/$/, "");
+      const catalog = await discoverOpenRouterModels(
+        candidateKey,
+        undefined,
+        providerBaseUrl,
+      );
+      const selectedChat = catalog.chatModels.find(
+        (model) => model.id === preferences.modelId,
+      );
+      const selectedVoice = catalog.transcriptionModels.find(
+        (model) => model.id === preferences.transcriptionModelId,
+      );
       // Save a new key only after OpenRouter successfully returns the chat catalog.
       await writeApiKey(candidateKey);
       setHasKey(true);
@@ -786,9 +935,19 @@ export default function HomeScreen() {
         providerBaseUrl,
         modelId: selectedChat?.id ?? "",
         modelName: selectedChat?.name ?? "",
-        modelSupportsImages: Boolean(selectedChat?.inputModalities.includes("image")),
-        transcriptionModelId: selectedVoice?.id ?? (catalog.transcriptionWarning ? preferences.transcriptionModelId : ""),
-        transcriptionModelName: selectedVoice?.name ?? (catalog.transcriptionWarning ? preferences.transcriptionModelName : ""),
+        modelSupportsImages: Boolean(
+          selectedChat?.inputModalities.includes("image"),
+        ),
+        transcriptionModelId:
+          selectedVoice?.id ??
+          (catalog.transcriptionWarning
+            ? preferences.transcriptionModelId
+            : ""),
+        transcriptionModelName:
+          selectedVoice?.name ??
+          (catalog.transcriptionWarning
+            ? preferences.transcriptionModelName
+            : ""),
       };
       setPreferences(nextPreferences);
       await savePreferences(nextPreferences);
@@ -834,7 +993,9 @@ export default function HomeScreen() {
     try {
       await savePreferences(nextPreferences);
     } catch {
-      setSettingsNotice("The selected transcription model could not be saved locally.");
+      setSettingsNotice(
+        "The selected transcription model could not be saved locally.",
+      );
     }
   }
 
@@ -856,12 +1017,16 @@ export default function HomeScreen() {
         await savePreferences(nextPreferences);
       } catch {
         await deleteGitHubToken();
-        throw new Error("The profile could not be saved locally; the token was not kept.");
+        throw new Error(
+          "The profile could not be saved locally; the token was not kept.",
+        );
       }
       setPreferences(nextPreferences);
       setGithubProfile(profile);
       setGithubRepositories(repositories);
-      setAccountsNotice(`Connected as @${profile.login}. Read-only access verified for ${repositories.length} repositories. The token stays in secure storage and is never sent to the AI provider.`);
+      setAccountsNotice(
+        `Connected as @${profile.login}. Read-only access verified for ${repositories.length} repositories. The token stays in secure storage and is never sent to the AI provider.`,
+      );
       return true;
     } catch (error) {
       setAccountsNotice(safeTaskError(error));
@@ -874,14 +1039,23 @@ export default function HomeScreen() {
   async function disconnectGitHub() {
     try {
       await deleteGitHubToken();
-      const nextPreferences = { ...preferences, githubLogin: "", githubAvatarUrl: "", githubRepositories: "" };
+      const nextPreferences = {
+        ...preferences,
+        githubLogin: "",
+        githubAvatarUrl: "",
+        githubRepositories: "",
+      };
       setPreferences(nextPreferences);
       setGithubProfile(null);
       setGithubRepositories([]);
       await savePreferences(nextPreferences);
-      setAccountsNotice("GitHub token removed from this device. Revoke the token at GitHub separately if you no longer need it.");
+      setAccountsNotice(
+        "GitHub token removed from this device. Revoke the token at GitHub separately if you no longer need it.",
+      );
     } catch {
-      setAccountsNotice("Could not remove the GitHub token from secure storage. Please try again.");
+      setAccountsNotice(
+        "Could not remove the GitHub token from secure storage. Please try again.",
+      );
     }
   }
 
@@ -1063,10 +1237,16 @@ export default function HomeScreen() {
                 <Text
                   style={[
                     styles.welcomeEyebrow,
-                    { writingDirection: preferences.language === "ur" ? "rtl" : "ltr" },
+                    {
+                      writingDirection:
+                        preferences.language === "ur" ? "rtl" : "ltr",
+                    },
                   ]}
                 >
-                  {t("Your conversations, your way.", "آپ کی گفتگو، آپ کے اختیار میں")}
+                  {t(
+                    "Your conversations, your way.",
+                    "آپ کی گفتگو، آپ کے اختیار میں",
+                  )}
                 </Text>
                 <Text style={styles.welcomeTitle}>
                   {t(
@@ -1192,45 +1372,57 @@ export default function HomeScreen() {
           <View style={styles.composerWrap}>
             <View style={styles.composer}>
               <View style={styles.composerInputRow}>
-              <TextInput
-                accessibilityLabel="Message your AI model"
-                value={draft}
-                onChangeText={setDraft}
-                placeholder={t(
-                  "Message Raabta…",
-                  "پیغام لکھیں…",
-                )}
-                placeholderTextColor="#909995"
-                multiline
-                maxLength={12000}
-                style={[styles.composerInput, styles.autoDirection]}
-                textAlignVertical="top"
-                returnKeyType="default"
-                editable={isReady && !isSending && !isTranscribing}
-              />
+                <TextInput
+                  accessibilityLabel="Message your AI model"
+                  value={draft}
+                  onChangeText={setDraft}
+                  placeholder={t("Message Raabta…", "پیغام لکھیں…")}
+                  placeholderTextColor="#909995"
+                  multiline
+                  maxLength={12000}
+                  style={[styles.composerInput, styles.autoDirection]}
+                  textAlignVertical="top"
+                  returnKeyType="default"
+                  editable={isReady && !isSending && !isTranscribing}
+                />
               </View>
               <View style={styles.composerActions}>
                 <ComposerIconButton
                   icon="add"
-                  label={t("Add an image, file or audio", "تصویر، فائل یا آڈیو شامل کریں")}
+                  label={t(
+                    "Add an image, file or audio",
+                    "تصویر، فائل یا آڈیو شامل کریں",
+                  )}
                   onPress={() => setAttachmentMenuVisible(true)}
-                  disabled={!isReady || isSending || isTranscribing || isRecording}
+                  disabled={
+                    !isReady || isSending || isTranscribing || isRecording
+                  }
                 />
                 <ComposerIconButton
                   icon="logo-github"
                   label={t("Connected accounts", "منسلک اکاؤنٹس")}
-                  onPress={() => { setAccountsNotice(""); setAccountsVisible(true); }}
+                  onPress={() => {
+                    setAccountsNotice("");
+                    setAccountsVisible(true);
+                  }}
                   active={Boolean(githubProfile)}
                 />
                 <ComposerIconButton
                   icon="laptop-outline"
                   label={t("Web research and links", "ویب تحقیق اور لنکس")}
-                  onPress={() => { setShowError(""); setPanel("research"); }}
+                  onPress={() => {
+                    setShowError("");
+                    setPanel("research");
+                  }}
                   disabled={!isReady || isSending || isTranscribing}
                 />
                 <ComposerIconButton
                   icon={isRecording ? "stop-circle-outline" : "mic-outline"}
-                  label={isRecording ? t("Stop recording", "ریکارڈنگ روکیں") : t("Record voice", "آواز ریکارڈ کریں")}
+                  label={
+                    isRecording
+                      ? t("Stop recording", "ریکارڈنگ روکیں")
+                      : t("Record voice", "آواز ریکارڈ کریں")
+                  }
                   onPress={() => void toggleVoiceRecording()}
                   active={isRecording}
                   disabled={!isReady || isSending || isTranscribing}
@@ -1238,16 +1430,34 @@ export default function HomeScreen() {
                 <View style={styles.composerActionsSpacer} />
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={isSending || isTranscribing ? t("Stop current task", "موجودہ کام روکیں") : t("Send message", "پیغام بھیجیں")}
-                  onPress={isSending || isTranscribing ? () => controllerRef.current?.abort() : sendMessage}
-                  disabled={!(isSending || isTranscribing) && ((!draft.trim() && !pendingAttachments.length) || !isReady)}
+                  accessibilityLabel={
+                    isSending || isTranscribing
+                      ? t("Stop current task", "موجودہ کام روکیں")
+                      : t("Send message", "پیغام بھیجیں")
+                  }
+                  onPress={
+                    isSending || isTranscribing
+                      ? () => controllerRef.current?.abort()
+                      : sendMessage
+                  }
+                  disabled={
+                    !(isSending || isTranscribing) &&
+                    ((!draft.trim() && !pendingAttachments.length) || !isReady)
+                  }
                   style={({ pressed }) => [
                     styles.sendButton,
-                    !(isSending || isTranscribing) && ((!draft.trim() && !pendingAttachments.length) || !isReady) && styles.sendButtonDisabled,
+                    !(isSending || isTranscribing) &&
+                      ((!draft.trim() && !pendingAttachments.length) ||
+                        !isReady) &&
+                      styles.sendButtonDisabled,
                     pressed && styles.pressed,
                   ]}
                 >
-                  {isSending || isTranscribing ? <Ionicons name="stop" size={17} color={C.white} /> : <Ionicons name="arrow-up" size={20} color={C.white} />}
+                  {isSending || isTranscribing ? (
+                    <Ionicons name="stop" size={17} color={C.white} />
+                  ) : (
+                    <Ionicons name="arrow-up" size={20} color={C.white} />
+                  )}
                 </Pressable>
               </View>
             </View>
@@ -1643,18 +1853,27 @@ export default function HomeScreen() {
             <View style={styles.flex}>
               <Text style={styles.settingsIntroTitle}>OpenRouter</Text>
               <Text style={styles.settingsIntroCopy}>
-                {t("Enter one API key. Raabta loads the model catalog; you select the model name.", "ایک API key درج کریں۔ رابطہ ماڈلز کی فہرست لوڈ کرے گا اور آپ نام سے ماڈل منتخب کریں گے۔")}
+                {t(
+                  "Enter one API key. Raabta loads the model catalog; you select the model name.",
+                  "ایک API key درج کریں۔ رابطہ ماڈلز کی فہرست لوڈ کرے گا اور آپ نام سے ماڈل منتخب کریں گے۔",
+                )}
               </Text>
             </View>
           </View>
 
           <FieldLabel
             title={t("OpenRouter API key", "OpenRouter API key")}
-            subtitle={t("Stored separately from chats. Connect loads the catalog but does not send a test prompt.", "یہ chats سے الگ محفوظ ہوتی ہے۔ Connect صرف فہرست لوڈ کرتا ہے، آزمائشی پیغام نہیں بھیجتا۔")}
+            subtitle={t(
+              "Stored separately from chats. Connect loads the catalog but does not send a test prompt.",
+              "یہ chats سے الگ محفوظ ہوتی ہے۔ Connect صرف فہرست لوڈ کرتا ہے، آزمائشی پیغام نہیں بھیجتا۔",
+            )}
           />
           <FieldLabel
             title={t("Provider API base URL", "Provider API base URL")}
-            subtitle={t("Use OpenRouter or any OpenAI-compatible /v1 endpoint. The key stays in secure storage.", "OpenRouter یا کسی بھی OpenAI-compatible /v1 endpoint کا استعمال کریں۔ key محفوظ storage میں رہتی ہے۔")}
+            subtitle={t(
+              "Use OpenRouter or any OpenAI-compatible /v1 endpoint. The key stays in secure storage.",
+              "OpenRouter یا کسی بھی OpenAI-compatible /v1 endpoint کا استعمال کریں۔ key محفوظ storage میں رہتی ہے۔",
+            )}
           />
           <TextInput
             accessibilityLabel="Provider API base URL"
@@ -1674,84 +1893,273 @@ export default function HomeScreen() {
               secureTextEntry={!keyVisible}
               value={keyDraft}
               onChangeText={setKeyDraft}
-              placeholder={hasKey ? t("Key stored securely · paste only to replace", "key محفوظ ہے · بدلنے کے لیے نئی key درج کریں") : t("Paste your OpenRouter API key", "اپنی OpenRouter API key درج کریں")}
+              placeholder={
+                hasKey
+                  ? t(
+                      "Key stored securely · paste only to replace",
+                      "key محفوظ ہے · بدلنے کے لیے نئی key درج کریں",
+                    )
+                  : t(
+                      "Paste your OpenRouter API key",
+                      "اپنی OpenRouter API key درج کریں",
+                    )
+              }
               placeholderTextColor="#9AA29E"
               style={[styles.fieldInput, styles.keyInput, styles.autoDirection]}
             />
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={keyVisible ? t("Hide API key", "API key چھپائیں") : t("Show API key", "API key دکھائیں")}
+              accessibilityLabel={
+                keyVisible
+                  ? t("Hide API key", "API key چھپائیں")
+                  : t("Show API key", "API key دکھائیں")
+              }
               disabled={!keyDraft}
               onPress={() => setKeyVisible((visible) => !visible)}
               style={styles.keyVisibilityButton}
             >
-              <Ionicons name={keyVisible ? "eye-off-outline" : "eye-outline"} size={19} color={keyDraft ? C.teal : C.muted} />
+              <Ionicons
+                name={keyVisible ? "eye-off-outline" : "eye-outline"}
+                size={19}
+                color={keyDraft ? C.teal : C.muted}
+              />
             </Pressable>
           </View>
           <View style={styles.keyStatus}>
-            <Ionicons name={openRouterConnected ? "checkmark-circle" : hasKey ? "lock-closed" : "information-circle-outline"} size={15} color={openRouterConnected ? C.teal : C.muted} />
-            <Text style={[styles.keyStatusText, openRouterConnected && styles.keyStatusReady]}>
+            <Ionicons
+              name={
+                openRouterConnected
+                  ? "checkmark-circle"
+                  : hasKey
+                    ? "lock-closed"
+                    : "information-circle-outline"
+              }
+              size={15}
+              color={openRouterConnected ? C.teal : C.muted}
+            />
+            <Text
+              style={[
+                styles.keyStatusText,
+                openRouterConnected && styles.keyStatusReady,
+              ]}
+            >
               {openRouterConnected
                 ? Platform.OS === "web"
-                  ? t("Connected in this browser session", "اس browser session میں منسلک")
-                  : t("Connected · key stored in Android SecureStore", "منسلک · key Android SecureStore میں محفوظ")
+                  ? t(
+                      "Connected in this browser session",
+                      "اس browser session میں منسلک",
+                    )
+                  : t(
+                      "Connected · key stored in Android SecureStore",
+                      "منسلک · key Android SecureStore میں محفوظ",
+                    )
                 : hasKey
-                  ? t("A key is stored; connect it to verify OpenRouter and load models", "ایک key محفوظ ہے؛ OpenRouter کی تصدیق اور ماڈلز لوڈ کرنے کے لیے Connect کریں")
-                  : t("No OpenRouter key connected", "OpenRouter key منسلک نہیں")}
+                  ? t(
+                      "A key is stored; connect it to verify OpenRouter and load models",
+                      "ایک key محفوظ ہے؛ OpenRouter کی تصدیق اور ماڈلز لوڈ کرنے کے لیے Connect کریں",
+                    )
+                  : t(
+                      "No OpenRouter key connected",
+                      "OpenRouter key منسلک نہیں",
+                    )}
             </Text>
-            {hasKey ? <Pressable accessibilityRole="button" onPress={() => void removeConnectionKey()}><Text style={styles.removeKey}>{t("Remove", "حذف کریں")}</Text></Pressable> : null}
+            {hasKey ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void removeConnectionKey()}
+              >
+                <Text style={styles.removeKey}>{t("Remove", "حذف کریں")}</Text>
+              </Pressable>
+            ) : null}
           </View>
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: isTestingConnection }}
             disabled={isTestingConnection}
             onPress={() => void connectOpenRouter()}
-            style={({ pressed }) => [styles.primaryButton, isTestingConnection && styles.primaryButtonDisabled, pressed && !isTestingConnection && styles.pressed]}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              isTestingConnection && styles.primaryButtonDisabled,
+              pressed && !isTestingConnection && styles.pressed,
+            ]}
           >
-            {isTestingConnection ? <ActivityIndicator size="small" color={C.white} /> : <Ionicons name="cloud-download-outline" size={18} color={C.white} />}
-            <Text style={styles.primaryButtonText}>{isTestingConnection ? t("Loading available models…", "ماڈلز لوڈ ہو رہے ہیں…") : t("Connect & load models", "منسلک کریں اور ماڈلز لوڈ کریں")}</Text>
+            {isTestingConnection ? (
+              <ActivityIndicator size="small" color={C.white} />
+            ) : (
+              <Ionicons
+                name="cloud-download-outline"
+                size={18}
+                color={C.white}
+              />
+            )}
+            <Text style={styles.primaryButtonText}>
+              {isTestingConnection
+                ? t("Loading available models…", "ماڈلز لوڈ ہو رہے ہیں…")
+                : t("Connect & load models", "منسلک کریں اور ماڈلز لوڈ کریں")}
+            </Text>
           </Pressable>
-          <Pressable accessibilityRole="link" onPress={() => void Linking.openURL("https://openrouter.ai/keys").catch(() => undefined)} style={styles.toolChip}>
+          <Pressable
+            accessibilityRole="link"
+            onPress={() =>
+              void Linking.openURL("https://openrouter.ai/keys").catch(
+                () => undefined,
+              )
+            }
+            style={styles.toolChip}
+          >
             <Ionicons name="open-outline" size={14} color={C.teal} />
-            <Text style={styles.toolChipText}>{t("Get or manage an OpenRouter key", "OpenRouter key حاصل یا منظم کریں")}</Text>
+            <Text style={styles.toolChipText}>
+              {t(
+                "Get or manage an OpenRouter key",
+                "OpenRouter key حاصل یا منظم کریں",
+              )}
+            </Text>
           </Pressable>
 
-          <FieldLabel title={t("Chat model", "چیٹ ماڈل")} subtitle={t("Choose a model by its name from the connected catalog.", "منسلک فہرست سے نام کے ذریعے ماڈل منتخب کریں۔")} />
-          <Pressable accessibilityRole="button" onPress={() => {
+          <FieldLabel
+            title={t("Chat model", "چیٹ ماڈل")}
+            subtitle={t(
+              "Choose a model by its name from the connected catalog.",
+              "منسلک فہرست سے نام کے ذریعے ماڈل منتخب کریں۔",
+            )}
+          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
               if (!openRouterConnected) {
-                setSettingsNotice(t("Connect OpenRouter before browsing models.", "ماڈلز دیکھنے سے پہلے OpenRouter جوڑیں۔"));
+                setSettingsNotice(
+                  t(
+                    "Connect OpenRouter before browsing models.",
+                    "ماڈلز دیکھنے سے پہلے OpenRouter جوڑیں۔",
+                  ),
+                );
                 return;
               }
               setModelPickerKind("chat");
               if (!modelCatalog) void connectOpenRouter();
-            }} style={[styles.researchCard, { flexDirection: "row", alignItems: "center" }]}>
-            <View style={styles.setupIcon}><Ionicons name="chatbubble-ellipses-outline" size={17} color={C.teal} /></View>
-            <View style={styles.flex}><Text style={styles.setupTitle}>{preferences.modelName || t("Choose a chat model", "چیٹ ماڈل منتخب کریں")}</Text><Text style={styles.setupSubtitle}>{preferences.modelId ? t("Selected from the loaded catalog", "لوڈ کی گئی فہرست سے منتخب") : t("Tap to browse and choose by name", "نام سے ماڈل دیکھنے اور منتخب کرنے کے لیے دبائیں")}</Text></View>
+            }}
+            style={[
+              styles.researchCard,
+              { flexDirection: "row", alignItems: "center" },
+            ]}
+          >
+            <View style={styles.setupIcon}>
+              <Ionicons
+                name="chatbubble-ellipses-outline"
+                size={17}
+                color={C.teal}
+              />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.setupTitle}>
+                {preferences.modelName ||
+                  t("Choose a chat model", "چیٹ ماڈل منتخب کریں")}
+              </Text>
+              <Text style={styles.setupSubtitle}>
+                {preferences.modelId
+                  ? t(
+                      "Selected from the loaded catalog",
+                      "لوڈ کی گئی فہرست سے منتخب",
+                    )
+                  : t(
+                      "Tap to browse and choose by name",
+                      "نام سے ماڈل دیکھنے اور منتخب کرنے کے لیے دبائیں",
+                    )}
+              </Text>
+            </View>
             <Ionicons name="chevron-forward" size={17} color={C.muted} />
           </Pressable>
-          {preferences.modelId ? <Text style={styles.fieldSubtitle}>{preferences.modelSupportsImages ? t("Image input listed · can send selected photos", "Image input دستیاب · تصاویر بھیج سکتے ہیں") : t("Text chat model · choose an image-capable model to ask about photos", "Text model · تصاویر کے لیے image-capable model منتخب کریں")}</Text> : null}
+          {preferences.modelId ? (
+            <Text style={styles.fieldSubtitle}>
+              {preferences.modelSupportsImages
+                ? t(
+                    "Image input listed · can send selected photos",
+                    "Image input دستیاب · تصاویر بھیج سکتے ہیں",
+                  )
+                : t(
+                    "Text chat model · choose an image-capable model to ask about photos",
+                    "Text model · تصاویر کے لیے image-capable model منتخب کریں",
+                  )}
+            </Text>
+          ) : null}
 
-          <FieldLabel title={t("Voice transcription · optional", "آواز کا متن · اختیاری")} subtitle={t("Uses the same OpenRouter key, with a model listed for transcription.", "اسی OpenRouter key سے transcription کے لیے درج ماڈل استعمال ہوتا ہے۔")} />
-          <Pressable accessibilityRole="button" onPress={() => {
+          <FieldLabel
+            title={t("Voice transcription · optional", "آواز کا متن · اختیاری")}
+            subtitle={t(
+              "Uses the same OpenRouter key, with a model listed for transcription.",
+              "اسی OpenRouter key سے transcription کے لیے درج ماڈل استعمال ہوتا ہے۔",
+            )}
+          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
               if (!openRouterConnected) {
-                setSettingsNotice(t("Connect OpenRouter before browsing models.", "ماڈلز دیکھنے سے پہلے OpenRouter جوڑیں۔"));
+                setSettingsNotice(
+                  t(
+                    "Connect OpenRouter before browsing models.",
+                    "ماڈلز دیکھنے سے پہلے OpenRouter جوڑیں۔",
+                  ),
+                );
                 return;
               }
               setModelPickerKind("transcription");
               if (!modelCatalog) void connectOpenRouter();
-            }} style={[styles.researchCard, { flexDirection: "row", alignItems: "center" }]}>
-            <View style={styles.setupIcon}><Ionicons name="mic-outline" size={17} color={C.teal} /></View>
-            <View style={styles.flex}><Text style={styles.setupTitle}>{preferences.transcriptionModelName || t("Choose a transcription model", "آواز کے متن کا ماڈل منتخب کریں")}</Text><Text style={styles.setupSubtitle}>{preferences.transcriptionModelId ? t("Selected from the transcription catalog", "transcription فہرست سے منتخب") : t("Voice stays optional until selected", "ماڈل منتخب ہونے تک آواز بند رہے گی")}</Text></View>
+            }}
+            style={[
+              styles.researchCard,
+              { flexDirection: "row", alignItems: "center" },
+            ]}
+          >
+            <View style={styles.setupIcon}>
+              <Ionicons name="mic-outline" size={17} color={C.teal} />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.setupTitle}>
+                {preferences.transcriptionModelName ||
+                  t(
+                    "Choose a transcription model",
+                    "آواز کے متن کا ماڈل منتخب کریں",
+                  )}
+              </Text>
+              <Text style={styles.setupSubtitle}>
+                {preferences.transcriptionModelId
+                  ? t(
+                      "Selected from the transcription catalog",
+                      "transcription فہرست سے منتخب",
+                    )
+                  : t(
+                      "Voice stays optional until selected",
+                      "ماڈل منتخب ہونے تک آواز بند رہے گی",
+                    )}
+              </Text>
+            </View>
             <Ionicons name="chevron-forward" size={17} color={C.muted} />
           </Pressable>
-          {modelCatalog?.transcriptionWarning ? <Notice text={modelCatalog.transcriptionWarning} /> : null}
+          {modelCatalog?.transcriptionWarning ? (
+            <Notice text={modelCatalog.transcriptionWarning} />
+          ) : null}
           {settingsNotice ? <Notice text={settingsNotice} /> : null}
           <Text style={styles.testConnectionNote}>
-            {t("A catalog entry does not guarantee account access. Sending a chat, image or recording may incur provider charges; loading models sends no inference.", "فہرست میں ماڈل آنے سے account access کی ضمانت نہیں۔ پیغام، تصویر یا ریکارڈنگ بھیجنے پر provider فیس لے سکتا ہے؛ ماڈلز لوڈ کرنے پر inference نہیں بھیجا جاتا۔")}
+            {t(
+              "A catalog entry does not guarantee account access. Sending a chat, image or recording may incur provider charges; loading models sends no inference.",
+              "فہرست میں ماڈل آنے سے account access کی ضمانت نہیں۔ پیغام، تصویر یا ریکارڈنگ بھیجنے پر provider فیس لے سکتا ہے؛ ماڈلز لوڈ کرنے پر inference نہیں بھیجا جاتا۔",
+            )}
           </Text>
-          <Pressable accessibilityRole="button" onPress={() => { setAccountsNotice(""); setAccountsVisible(true); }} style={styles.secondaryButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setAccountsNotice("");
+              setAccountsVisible(true);
+            }}
+            style={styles.secondaryButton}
+          >
             <Ionicons name="logo-github" size={18} color={C.teal} />
-            <Text style={styles.secondaryButtonText}>{t("Accounts", "اکاؤنٹس")} · {githubProfile ? `GitHub @${githubProfile.login}` : t("connect GitHub", "GitHub جوڑیں")}</Text>
+            <Text style={styles.secondaryButtonText}>
+              {t("Accounts", "اکاؤنٹس")} ·{" "}
+              {githubProfile
+                ? `GitHub @${githubProfile.login}`
+                : t("connect GitHub", "GitHub جوڑیں")}
+            </Text>
             <Ionicons name="chevron-forward" size={15} color={C.muted} />
           </Pressable>
 
@@ -1805,11 +2213,16 @@ export default function HomeScreen() {
         selectedModelName={preferences.modelName}
         githubProfile={githubProfile}
         repositoryCount={githubRepositories.length}
-        repositoryNames={githubRepositories.map((repository) => repository.fullName)}
+        repositoryNames={githubRepositories.map(
+          (repository) => repository.fullName,
+        )}
         connecting={isConnectingGitHub}
         status={accountsNotice}
         onClose={() => setAccountsVisible(false)}
-        onManageOpenRouter={() => { setAccountsVisible(false); openSettings(); }}
+        onManageOpenRouter={() => {
+          setAccountsVisible(false);
+          openSettings();
+        }}
         onConnectGitHub={connectGitHub}
         onDisconnectGitHub={() => void disconnectGitHub()}
       />
@@ -1818,13 +2231,29 @@ export default function HomeScreen() {
         visible={modelPickerKind !== null}
         language={preferences.language}
         kind={modelPickerKind ?? "chat"}
-        models={modelPickerKind === "transcription" ? modelCatalog?.transcriptionModels ?? [] : modelCatalog?.chatModels ?? []}
-        selectedModelId={modelPickerKind === "transcription" ? preferences.transcriptionModelId : preferences.modelId}
+        models={
+          modelPickerKind === "transcription"
+            ? (modelCatalog?.transcriptionModels ?? [])
+            : (modelCatalog?.chatModels ?? [])
+        }
+        selectedModelId={
+          modelPickerKind === "transcription"
+            ? preferences.transcriptionModelId
+            : preferences.modelId
+        }
         loading={isTestingConnection}
-        message={modelPickerKind === "transcription" ? modelCatalog?.transcriptionWarning ?? "" : ""}
+        message={
+          modelPickerKind === "transcription"
+            ? (modelCatalog?.transcriptionWarning ?? "")
+            : ""
+        }
         onClose={() => setModelPickerKind(null)}
         onRefresh={refreshModelCatalog}
-        onSelect={(model) => { if (modelPickerKind === "transcription") void selectTranscriptionModel(model); else void selectChatModel(model); }}
+        onSelect={(model) => {
+          if (modelPickerKind === "transcription")
+            void selectTranscriptionModel(model);
+          else void selectChatModel(model);
+        }}
       />
       <AttachmentSheet
         visible={attachmentMenuVisible}
@@ -1948,7 +2377,9 @@ function ComposerIconButton({
 }
 
 function shouldAutoResearch(text: string): boolean {
-  return /\b(latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather|قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)\b/i.test(text);
+  return /\b(latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather|قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)\b/i.test(
+    text,
+  );
 }
 
 function MessageRow({
@@ -1960,7 +2391,13 @@ function MessageRow({
 }) {
   if (message.role === "activity") {
     const status = message.activityStatus ?? "complete";
-    if (status === "complete" && /^(Preparing the prompt|Sent a request|Response received|Preparing a request|Prepared the prompt|.*سوال اور معاون منسلکات تیار ہیں|.*کو درخواست بھیجی|.*سے جواب موصول ہو گیا)/i.test(message.content)) return null;
+    if (
+      status === "complete" &&
+      /^(Preparing the prompt|Sent a request|Response received|Preparing a request|Prepared the prompt|.*سوال اور معاون منسلکات تیار ہیں|.*کو درخواست بھیجی|.*سے جواب موصول ہو گیا)/i.test(
+        message.content,
+      )
+    )
+      return null;
     const icon: IconName =
       status === "working"
         ? "sync-outline"
@@ -2016,7 +2453,14 @@ function MessageRow({
       >
         {!isUser ? <Text style={styles.assistantLabel}>RAABTA</Text> : null}
         {isUser ? (
-          <Text selectable style={[styles.messageText, styles.userMessageText, { writingDirection: "auto" }]}>
+          <Text
+            selectable
+            style={[
+              styles.messageText,
+              styles.userMessageText,
+              { writingDirection: "auto" },
+            ]}
+          >
             {message.content}
           </Text>
         ) : (
@@ -2027,7 +2471,8 @@ function MessageRow({
             selectable
             markdownStyle={assistantMarkdownStyle}
             onLinkPress={({ url }) => {
-              if (isHttpsUrl(url)) void Linking.openURL(url).catch(() => undefined);
+              if (isHttpsUrl(url))
+                void Linking.openURL(url).catch(() => undefined);
             }}
           />
         )}
@@ -2501,8 +2946,22 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 1,
   },
-  modelBadge: { maxWidth: 116, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 99, backgroundColor: C.tealPale },
-  modelBadgeText: { color: C.tealDark, fontSize: 9, fontWeight: "700", flexShrink: 1 },
+  modelBadge: {
+    maxWidth: 116,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 99,
+    backgroundColor: C.tealPale,
+  },
+  modelBadgeText: {
+    color: C.tealDark,
+    fontSize: 9,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
   threadTitle: { flex: 1, color: C.muted, textAlign: "right", fontSize: 12 },
   messageList: {
     paddingHorizontal: 18,
@@ -2706,10 +3165,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
   },
-  composerInputRow: { minHeight: 52, flexDirection: "row", alignItems: "flex-start" },
-  composerActions: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 4 },
+  composerInputRow: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  composerActions: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   composerActionsSpacer: { flex: 1 },
-  composerIconButton: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: C.paper },
+  composerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: C.paper,
+  },
   composerIconButtonActive: { backgroundColor: C.tealPale },
   composerIconButtonDisabled: { opacity: 0.4 },
   sendButton: {

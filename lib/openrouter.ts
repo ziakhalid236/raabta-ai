@@ -19,7 +19,10 @@ export type OpenRouterCatalog = {
 };
 
 export class OpenRouterCatalogError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
     super(message);
     this.name = "OpenRouterCatalogError";
   }
@@ -32,7 +35,8 @@ export async function discoverOpenRouterModels(
   baseUrl = OPENROUTER_API_BASE,
 ): Promise<OpenRouterCatalog> {
   const key = apiKey.trim();
-  if (!key) throw new OpenRouterCatalogError("Enter an OpenRouter API key first.");
+  if (!key)
+    throw new OpenRouterCatalogError("Enter an OpenRouter API key first.");
 
   const chatModels = await fetchModelCollection(key, "text", signal, baseUrl);
   if (!chatModels.length) {
@@ -194,7 +198,8 @@ function catalogResponseError(status: number): OpenRouterCatalogError {
     429: "OpenRouter rate-limited the catalog request (429). Wait briefly and refresh.",
   };
   return new OpenRouterCatalogError(
-    messages[status] ?? `OpenRouter returned HTTP ${status} while loading models.`,
+    messages[status] ??
+      `OpenRouter returned HTTP ${status} while loading models.`,
     status,
   );
 }

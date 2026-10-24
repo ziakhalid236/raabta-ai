@@ -30,10 +30,21 @@ export async function makeProviderMessages(
     let attachmentContext = "";
     for (const attachment of message.attachments ?? []) {
       if (attachment.kind === "image") {
-        parts.push({ type: "image_url", image_url: { url: await readImageAsDataUrl(attachment) } });
-      } else if ((attachment.kind === "document" || attachment.kind === "research") && attachment.extractedText) {
-        const heading = attachment.kind === "research" ? "Retrieved web source" : "User-attached document";
-        const source = attachment.sourceUrl ? `\nSource URL: ${attachment.sourceUrl}` : "";
+        parts.push({
+          type: "image_url",
+          image_url: { url: await readImageAsDataUrl(attachment) },
+        });
+      } else if (
+        (attachment.kind === "document" || attachment.kind === "research") &&
+        attachment.extractedText
+      ) {
+        const heading =
+          attachment.kind === "research"
+            ? "Retrieved web source"
+            : "User-attached document";
+        const source = attachment.sourceUrl
+          ? `\nSource URL: ${attachment.sourceUrl}`
+          : "";
         attachmentContext += `\n\n--- ${heading}: ${attachment.name}${source} ---\n${attachment.extractedText}`;
       }
     }
@@ -44,7 +55,11 @@ export async function makeProviderMessages(
       });
     }
     if (!parts.length) parts.push({ type: "text", text: "" });
-    output.push({ role: "user", content: parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts });
+    output.push({
+      role: "user",
+      content:
+        parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts,
+    });
   }
   return output;
 }
