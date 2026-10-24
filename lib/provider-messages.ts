@@ -7,8 +7,15 @@ const MAX_CONTEXT_CHARS = 120_000;
 export async function makeProviderMessages(
   messages: ChatMessage[],
   signal: AbortSignal,
+  githubContext = "",
 ): Promise<ChatRequestMessage[]> {
   const output: ChatRequestMessage[] = [];
+  if (githubContext.trim()) {
+    output.push({
+      role: "system",
+      content: `The user explicitly connected GitHub for read-only context. The app fetched the following repository metadata; it contains no token. Do not claim access to files not listed here.\n${githubContext.slice(0, 20_000)}`,
+    });
+  }
   for (const message of messages) {
     if (signal.aborted) throw new Error("Request stopped.");
     if (message.role === "activity") continue;

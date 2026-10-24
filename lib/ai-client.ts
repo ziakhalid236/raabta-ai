@@ -3,11 +3,11 @@ export type ChatContentPart =
   | { type: "image_url"; image_url: { url: string } };
 
 export type ChatRequestMessage = {
-  role: "user" | "assistant";
+  role: "system" | "user" | "assistant";
   content: string | ChatContentPart[];
 };
 
-const CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+const DEFAULT_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 const AUDIO_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
 
 export class AIRequestError extends Error {
@@ -26,10 +26,12 @@ export async function requestChatCompletion(args: {
   apiKey: string;
   messages: ChatRequestMessage[];
   signal: AbortSignal;
+  baseUrl?: string;
 }): Promise<string> {
+  const chatUrl = `${(args.baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "")}/chat/completions`;
   let response: Response;
   try {
-    response = await fetch(CHAT_COMPLETIONS_URL, {
+    response = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -29,11 +29,12 @@ export class OpenRouterCatalogError extends Error {
 export async function discoverOpenRouterModels(
   apiKey: string,
   signal?: AbortSignal,
+  baseUrl = OPENROUTER_API_BASE,
 ): Promise<OpenRouterCatalog> {
   const key = apiKey.trim();
   if (!key) throw new OpenRouterCatalogError("Enter an OpenRouter API key first.");
 
-  const chatModels = await fetchModelCollection(key, "text", signal);
+  const chatModels = await fetchModelCollection(key, "text", signal, baseUrl);
   if (!chatModels.length) {
     throw new OpenRouterCatalogError(
       "OpenRouter returned no text-chat models for this catalog request. Check the key and try again.",
@@ -45,6 +46,7 @@ export async function discoverOpenRouterModels(
       key,
       "transcription",
       signal,
+      baseUrl,
     );
     return { chatModels, transcriptionModels };
   } catch {
@@ -61,17 +63,19 @@ async function fetchModelCollection(
   apiKey: string,
   outputModality: "text" | "transcription",
   signal?: AbortSignal,
+  baseUrl = OPENROUTER_API_BASE,
 ): Promise<OpenRouterModel[]> {
-  const initial = new URL(`${OPENROUTER_API_BASE}/models`);
+  const normalizedBase = baseUrl.replace(/\/$/, "");
+  const initial = new URL(`${normalizedBase}/models`);
   initial.searchParams.set("output_modalities", outputModality);
   initial.searchParams.set("limit", "1000");
-  const origin = new URL(OPENROUTER_API_BASE).origin;
+  const origin = new URL(normalizedBase).origin;
   let nextUrl: URL | null = initial;
   const models: OpenRouterModel[] = [];
   const seen = new Set<string>();
 
   for (let page = 0; nextUrl && page < MAX_MODEL_PAGES; page += 1) {
-    if (nextUrl.origin !== origin || nextUrl.pathname !== "/api/v1/models") {
+    if (nextUrl.origin !== origin || !nextUrl.pathname.endsWith("/models")) {
       throw new OpenRouterCatalogError(
         "OpenRouter returned an unexpected model-catalog link.",
       );
@@ -117,7 +121,7 @@ async function fetchModelCollection(
       nextUrl = null;
     } else {
       try {
-        nextUrl = new URL(next, OPENROUTER_API_BASE);
+        nextUrl = new URL(next, normalizedBase);
       } catch {
         throw new OpenRouterCatalogError(
           "OpenRouter returned an unreadable pagination link.",

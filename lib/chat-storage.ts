@@ -31,6 +31,7 @@ export type ChatThread = {
 export type ChatPreferences = {
   language: "ur" | "en";
   openRouterConnected: boolean;
+  providerBaseUrl: string;
   modelId: string;
   modelName: string;
   modelSupportsImages: boolean;
@@ -38,6 +39,7 @@ export type ChatPreferences = {
   transcriptionModelName: string;
   githubLogin: string;
   githubAvatarUrl: string;
+  githubRepositories: string;
 };
 
 const THREADS_KEY = "raabta.chat.threads.v2";
@@ -51,6 +53,7 @@ const LEGACY_PREFERENCES_KEYS = [
 export const DEFAULT_PREFERENCES: ChatPreferences = {
   language: "en",
   openRouterConnected: false,
+  providerBaseUrl: "https://openrouter.ai/api/v1",
   modelId: "",
   modelName: "",
   modelSupportsImages: false,
@@ -58,6 +61,7 @@ export const DEFAULT_PREFERENCES: ChatPreferences = {
   transcriptionModelName: "",
   githubLogin: "",
   githubAvatarUrl: "",
+  githubRepositories: "",
 };
 
 export async function loadThreads(): Promise<ChatThread[]> {
@@ -104,6 +108,9 @@ export async function loadPreferences(): Promise<ChatPreferences> {
       // Old custom-provider keys/model IDs must be explicitly reconnected to OpenRouter.
       openRouterConnected:
         isCurrentSchema && data.openRouterConnected === true,
+      providerBaseUrl: isCurrentSchema && typeof data.providerBaseUrl === "string" && data.providerBaseUrl.trim()
+        ? data.providerBaseUrl.trim().replace(/\/$/, "")
+        : "https://openrouter.ai/api/v1",
       modelId: isCurrentSchema ? stringValue(data.modelId) : "",
       modelName: isCurrentSchema ? stringValue(data.modelName) : "",
       modelSupportsImages:
@@ -118,6 +125,7 @@ export async function loadPreferences(): Promise<ChatPreferences> {
       githubAvatarUrl: isCurrentSchema
         ? safeHttpsString(data.githubAvatarUrl)
         : "",
+      githubRepositories: isCurrentSchema ? stringValue(data.githubRepositories) : "",
     };
   } catch {
     return DEFAULT_PREFERENCES;

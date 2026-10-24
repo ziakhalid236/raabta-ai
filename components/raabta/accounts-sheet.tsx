@@ -37,6 +37,8 @@ export function AccountsSheet({
   openRouterConnected,
   selectedModelName,
   githubProfile,
+  repositoryCount,
+  repositoryNames,
   connecting,
   status,
   onClose,
@@ -49,6 +51,8 @@ export function AccountsSheet({
   openRouterConnected: boolean;
   selectedModelName: string;
   githubProfile: GitHubProfile | null;
+  repositoryCount: number;
+  repositoryNames: string[];
   connecting: boolean;
   status: string;
   onClose: () => void;
@@ -120,10 +124,18 @@ export function AccountsSheet({
               )}
               <View style={styles.flex}>
                 <Text style={styles.serviceName}>{githubProfile ? `@${githubProfile.login}` : "Connect GitHub"}</Text>
-                <Text style={styles.serviceDetail}>{githubProfile ? t("Identity checked on this device", "اس فون پر شناخت کی تصدیق") : t("No account connected", "کوئی اکاؤنٹ منسلک نہیں")}</Text>
+                <Text style={styles.serviceDetail}>{githubProfile ? t(`${repositoryCount} repositories verified for read-only access`, `${repositoryCount} repositories read-only رسائی کے لیے verified`) : t("No account connected", "کوئی اکاؤنٹ منسلک نہیں")}</Text>
               </View>
               {githubProfile ? <Ionicons name="checkmark-circle" size={20} color={C.teal} /> : null}
             </View>
+
+            {githubProfile && repositoryNames.length ? (
+              <View style={styles.repositoryList}>
+                <Text style={styles.repositoryListTitle}>{t("Verified repositories", "تصدیق شدہ repositories")}</Text>
+                {repositoryNames.slice(0, 20).map((name) => <Text key={name} style={styles.repositoryName}>• {name}</Text>)}
+                {repositoryNames.length > 20 ? <Text style={styles.repositoryName}>+ {repositoryNames.length - 20} more</Text> : null}
+              </View>
+            ) : null}
 
             {!githubProfile ? (
               <>
@@ -226,4 +238,7 @@ const styles = StyleSheet.create({
   privacyText: { flex: 1, color: C.tealDark, fontSize: 11, lineHeight: 16 },
   futureCard: { flexDirection: "row", alignItems: "flex-start", gap: 9, padding: 12, borderRadius: 14, backgroundColor: "#F0F1EE" },
   futureText: { flex: 1, color: C.muted, fontSize: 10, lineHeight: 15 },
+  repositoryList: { padding: 12, borderRadius: 14, backgroundColor: C.white, borderWidth: 1, borderColor: C.line },
+  repositoryListTitle: { color: C.ink, fontSize: 12, fontWeight: "700", marginBottom: 6 },
+  repositoryName: { color: C.muted, fontSize: 11, lineHeight: 18 },
 });

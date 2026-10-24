@@ -56,6 +56,7 @@ import {
 } from "@/lib/secure-credentials";
 import { discoverOpenRouterModels, type OpenRouterCatalog, type OpenRouterModel } from "@/lib/openrouter";
 import { fetchGitHubProfile, type GitHubProfile } from "@/lib/github-account";
+import { listGitHubRepositories, type GitHubRepository } from "@/lib/github-tools";
 import { AttachmentSheet } from "@/components/raabta/attachment-sheet";
 import { AccountsSheet } from "@/components/raabta/accounts-sheet";
 import { ModelPicker } from "@/components/raabta/model-picker";
@@ -122,6 +123,7 @@ export default function HomeScreen() {
   const isUrdu = preferences.language === "ur";
   const t = (english: string, urdu: string) => (isUrdu ? urdu : english);
   const [keyDraft, setKeyDraft] = useState("");
+  const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasKey, setHasKey] = useState(false);
@@ -130,6 +132,7 @@ export default function HomeScreen() {
   const [modelPickerKind, setModelPickerKind] = useState<"chat" | "transcription" | null>(null);
   const [accountsVisible, setAccountsVisible] = useState(false);
   const [githubProfile, setGithubProfile] = useState<GitHubProfile | null>(null);
+  const [githubRepositories, setGithubRepositories] = useState<GitHubRepository[]>([]);
   const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
   const [accountsNotice, setAccountsNotice] = useState("");
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
@@ -180,6 +183,7 @@ export default function HomeScreen() {
         setThreads(hydratedThreads);
         setActiveThreadId(hydratedThreads[0].id);
         setPreferences(storedPreferences);
+        setProviderBaseUrlDraft(storedPreferences.providerBaseUrl);
         setHasKey(Boolean(apiKey));
         setOpenRouterConnected(
           Boolean(apiKey && storedPreferences.openRouterConnected),
@@ -192,6 +196,12 @@ export default function HomeScreen() {
               }
             : null,
         );
+        try {
+          const saved = JSON.parse(storedPreferences.githubRepositories || "[]");
+          setGithubRepositories(Array.isArray(saved) ? saved : []);
+        } catch {
+          setGithubRepositories([]);
+        }
         if (!storedThreads.length) void saveThreads(hydratedThreads);
       } catch {
         if (!active) return;
@@ -398,6 +408,16 @@ export default function HomeScreen() {
             "آپ کے منتخب model کے لیے source اقتباسات اور گفتگو تیار ہو رہی ہے۔",
           ),
         );
+      } else if (shouldAutoResearch(text)) {
+        const retrieved = await searchWeb(text, controller.signal);
+        updateThread(currentThread.id, (thread) => ({
+          ...thread,
+          messages: thread.messages.map((message) =>
+            message.id === userMessage.id
+              ? { ...message, attachments: retrieved.map((source) => sourceToAttachment(source)) }
+              : message,
+          ),
+        }));
       }
       if (controller.signal.aborted)
         throw new Error("Request stopped before sending.");
@@ -411,23 +431,14 @@ export default function HomeScreen() {
       const providerMessages = await makeProviderMessages(
         latestThread.messages,
         controller.signal,
-      );
-      updateActivity(
-          isUrdu
-            ? `${chatDisplayName} کے لیے سوال اور معاون منسلکات تیار ہیں۔`
-            : `Prepared the prompt and supported attachments for ${chatDisplayName}.`,
-        "complete",
-      );
-      addActivity(
-          isUrdu
-            ? `${chatDisplayName} کو درخواست بھیجی؛ provider کے جواب کا انتظار ہے۔`
-            : `Sent a request to ${chatDisplayName}. Waiting for the provider’s response.`,
+        preferences.githubRepositories,
       );
       const answer = await requestChatCompletion({
         modelId: preferences.modelId,
         apiKey,
         messages: providerMessages,
         signal: controller.signal,
+        baseUrl: preferences.providerBaseUrl,
       });
       const assistantMessage: ChatMessage = {
         id: makeId("message"),
@@ -435,12 +446,6 @@ export default function HomeScreen() {
         content: answer,
         createdAt: new Date().toISOString(),
       };
-      updateActivity(
-          isUrdu
-            ? `${chatDisplayName} سے جواب موصول ہو گیا۔`
-            : `Response received from ${chatDisplayName}.`,
-        "complete",
-      );
       updateThread(currentThread.id, (thread) => ({
         ...thread,
         updatedAt: assistantMessage.createdAt,
@@ -764,7 +769,8 @@ export default function HomeScreen() {
     setIsTestingConnection(true);
     setSettingsNotice("");
     try {
-      const catalog = await discoverOpenRouterModels(candidateKey);
+      const providerBaseUrl = (providerBaseUrlDraft.trim() || preferences.providerBaseUrl || "https://openrouter.ai/api/v1").replace(/\/$/, "");
+      const catalog = await discoverOpenRouterModels(candidateKey, undefined, providerBaseUrl);
       const selectedChat = catalog.chatModels.find((model) => model.id === preferences.modelId);
       const selectedVoice = catalog.transcriptionModels.find((model) => model.id === preferences.transcriptionModelId);
       // Save a new key only after OpenRouter successfully returns the chat catalog.
@@ -777,6 +783,7 @@ export default function HomeScreen() {
       const nextPreferences = {
         ...preferences,
         openRouterConnected: true,
+        providerBaseUrl,
         modelId: selectedChat?.id ?? "",
         modelName: selectedChat?.name ?? "",
         modelSupportsImages: Boolean(selectedChat?.inputModalities.includes("image")),
@@ -837,11 +844,13 @@ export default function HomeScreen() {
     setAccountsNotice("");
     try {
       const profile = await fetchGitHubProfile(token);
+      const repositories = await listGitHubRepositories(token);
       await writeGitHubToken(token);
       const nextPreferences = {
         ...preferences,
         githubLogin: profile.login,
         githubAvatarUrl: profile.avatarUrl,
+        githubRepositories: JSON.stringify(repositories),
       };
       try {
         await savePreferences(nextPreferences);
@@ -851,7 +860,8 @@ export default function HomeScreen() {
       }
       setPreferences(nextPreferences);
       setGithubProfile(profile);
-      setAccountsNotice(`Connected as @${profile.login}. Only the GitHub profile endpoint was read.`);
+      setGithubRepositories(repositories);
+      setAccountsNotice(`Connected as @${profile.login}. Read-only access verified for ${repositories.length} repositories. The token stays in secure storage and is never sent to the AI provider.`);
       return true;
     } catch (error) {
       setAccountsNotice(safeTaskError(error));
@@ -864,9 +874,10 @@ export default function HomeScreen() {
   async function disconnectGitHub() {
     try {
       await deleteGitHubToken();
-      const nextPreferences = { ...preferences, githubLogin: "", githubAvatarUrl: "" };
+      const nextPreferences = { ...preferences, githubLogin: "", githubAvatarUrl: "", githubRepositories: "" };
       setPreferences(nextPreferences);
       setGithubProfile(null);
+      setGithubRepositories([]);
       await savePreferences(nextPreferences);
       setAccountsNotice("GitHub token removed from this device. Revoke the token at GitHub separately if you no longer need it.");
     } catch {
@@ -1641,6 +1652,20 @@ export default function HomeScreen() {
             title={t("OpenRouter API key", "OpenRouter API key")}
             subtitle={t("Stored separately from chats. Connect loads the catalog but does not send a test prompt.", "یہ chats سے الگ محفوظ ہوتی ہے۔ Connect صرف فہرست لوڈ کرتا ہے، آزمائشی پیغام نہیں بھیجتا۔")}
           />
+          <FieldLabel
+            title={t("Provider API base URL", "Provider API base URL")}
+            subtitle={t("Use OpenRouter or any OpenAI-compatible /v1 endpoint. The key stays in secure storage.", "OpenRouter یا کسی بھی OpenAI-compatible /v1 endpoint کا استعمال کریں۔ key محفوظ storage میں رہتی ہے۔")}
+          />
+          <TextInput
+            accessibilityLabel="Provider API base URL"
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={providerBaseUrlDraft}
+            onChangeText={setProviderBaseUrlDraft}
+            placeholder="https://openrouter.ai/api/v1"
+            placeholderTextColor="#9AA29E"
+            style={[styles.fieldInput, styles.autoDirection]}
+          />
           <View style={styles.keyInputWrap}>
             <TextInput
               accessibilityLabel="OpenRouter API key"
@@ -1779,6 +1804,8 @@ export default function HomeScreen() {
         openRouterConnected={openRouterConnected}
         selectedModelName={preferences.modelName}
         githubProfile={githubProfile}
+        repositoryCount={githubRepositories.length}
+        repositoryNames={githubRepositories.map((repository) => repository.fullName)}
         connecting={isConnectingGitHub}
         status={accountsNotice}
         onClose={() => setAccountsVisible(false)}
@@ -1920,6 +1947,10 @@ function ComposerIconButton({
   );
 }
 
+function shouldAutoResearch(text: string): boolean {
+  return /\b(latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather|قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)\b/i.test(text);
+}
+
 function MessageRow({
   message,
   language,
@@ -1929,6 +1960,7 @@ function MessageRow({
 }) {
   if (message.role === "activity") {
     const status = message.activityStatus ?? "complete";
+    if (status === "complete" && /^(Preparing the prompt|Sent a request|Response received|Preparing a request|Prepared the prompt|.*سوال اور معاون منسلکات تیار ہیں|.*کو درخواست بھیجی|.*سے جواب موصول ہو گیا)/i.test(message.content)) return null;
     const icon: IconName =
       status === "working"
         ? "sync-outline"
