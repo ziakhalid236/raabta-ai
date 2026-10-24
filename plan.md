@@ -1,79 +1,88 @@
 # Raabta AI (رابطہ) — نفاذ اور ریلیز کا منصوبہ
 
-## مصنوعات کا مقصد
+## مصنوعات اور موجودہ مرحلے کا مقصد
 
-Raabta AI ایک Android-first موبائل ایپ ہے جس میں صارف اپنے AI provider/model کو خود configure کرے۔ ڈیزائن ہلکا، پریمیم، یک ہاتھ سے قابلِ استعمال اور Urdu/English-friendly رہے۔ Chat history اور action history فون کے app sandbox میں مقامی رہے؛ login، Raabta account یا cloud chat sync درکار نہ ہو۔ کام مرحلہ وار بڑھانا ہے: AI chat، منتخب web/file/image/voice tools، محدود assistant workflows، پھر کبھی explicit permission والے account/tool agents۔ ہر action حقیقی ہو، chat میں چھوٹے timeline event کی صورت نظر آئے، اور موجود نہ ہونے والی صلاحیت کو فعال نہ بتایا جائے۔
+Raabta AI ایک Android-first، local-first موبائل AI assistant ہے۔ صارف بغیر Raabta account، login یا cloud chat sync کے اپنے فون پر بات چیت رکھتا ہے، اپنا OpenRouter API key خود دیتا ہے، اور ایک حقیقی model answer حاصل کرتا ہے۔ کوئی API key source code میں نہیں ہوگی۔ Chat threads، selected model preference، message attachments کے مقامی metadata اور action events فون پر محفوظ رہیں گے؛ Android secrets Expo SecureStore میں الگ رہیں گے۔ Web Preview میں secrets صرف موجود browser session کی memory میں رہتے ہیں۔
 
-صارف کی تازہ ضروریات میں OpenAI-compatible open-source موبائل بنیاد reuse کرنا، بہترین UI، public open-source source release، GitHub Actions سے Android APK build، اور کام کی ہر حقیقی پیش رفت دکھانا شامل ہیں۔ Mobile starter کا canonical source Manus-managed ہی رہے گا؛ GitHub کے لیے secret-scrubbed public snapshot الگ ہے۔ `.github/workflows/android-apk.yml` public repo میں pnpm lockfile install، Expo Android prebuild، Gradle `assembleDebug` اور 30 دن کے APK artifact upload کی قابلِ تکرار pipeline فراہم کرے گا۔ اصل APK صرف workflow کی کامیابی اور artifact download کے بعد deliver ہو گا۔
+یہ task موجودہ Phase 2/3 release کا UX/provider/accounts overhaul ہے؛ اسے نئے starter سے دوبارہ نہیں بنانا۔ موجودہ public source mirror، native artwork، assistant timeline، research/media handling اور Android Actions build کو برقرار رکھا جائے گا۔ بعد کے مراحل کو roadmap میں واضح مستقبل کے کام کے طور پر رکھا جائے گا، موجودہ صلاحیت نہ بتایا جائے۔
 
-## موجودہ قابلِ استعمال scope
+## Scope اور قابلِ استعمال رویہ
 
-### زبان اور سمت
+### زبان، composer اور visual design
 
-نئی تنصیب Urdu سے شروع ہوتی ہے۔ Settings میں صارف Urdu یا English منتخب کر سکتا ہے؛ یہ ترجیح فون پر محفوظ رہتی ہے۔ منتخب زبان کے مطابق navigation، مرکزی چیٹ، تحقیق/ترتیبات، roadmap اور timeline labels بدلتے ہیں؛ اردو چیٹ/input متن کو RTL اور دوسرے اسکرپٹ کو automatic direction ملتی ہے۔
+- نئی install پر UI English میں کھلے؛ Urdu اور English کا محفوظ language toggle برقرار رہے۔ موجودہ صارف کی محفوظ زبان کی ترجیح برقرار رہے، سوائے پہلی مرتبہ کوئی ترجیح محفوظ نہ ہونے کے؛ Urdu متن/input کی RTL اور Latin متن کی automatic direction برقرار رہے۔
+- مرکزی composer صارف کے screenshot کے مطابق ہلکے ivory/white rounded panel میں ہو: اوپر multiline text field، اس کے فوراً نیچے icon row، اور row کے آخر میں واضح send/stop button۔ یہی row ہمیشہ composer کے ساتھ attached رہے، الگ tool rail کی صورت میں پیغام scroll area کو نہ لے۔
+- Icon row میں attachment `+`، GitHub logo سے Accounts، browser/research، اور microphone کا فوری اختیار ہو۔ `+` sheet میں موجود image، document اور audio-file picker رہیں؛ GitHub logo کھولنے پر connected accounts/connection state واضح دکھے۔ Icon buttons واضح accessible touch targets ہوں اور پانچ کنٹرول چھوٹی Android screen پر بھی ایک قطار میں fit ہوں۔
+- موجودہ ivory، deep-teal، paper divider اور paired-arc Raabta identity برقرار رہے۔ نئی model/account views compact native bottom sheets/full-screen panels ہوں، dashboard grid نہیں۔
 
-### Stage 1 — Provider-neutral AI chat
+### OpenRouter — صرف ایک key، خودکار model catalog، صارف کا انتخاب
 
-- اپنا HTTPS OpenAI-compatible Chat Completions endpoint، model ID اور API key Settings میں configure کریں؛ کوئی real provider یا key hardcode نہیں۔
-- حقیقی provider سے جواب آنے پر ہی جواب دکھے؛ missing config، network، key، model یا provider error واضح دکھائیں۔
-- Start/open conversation، device-only conversation history، cancellation اور محفوظ progress/error events؛ event logs provider chat body میں نہیں بھیجے جائیں گے۔
-- Android key محفوظ رکھنے کے لیے Expo SecureStore؛ browser Preview میں صرف session memory۔ غیر رازدارانہ preferences اور chat AsyncStorage میں، الگ encrypted نہیں۔
+- Settings میں provider URL، model ID، transcription URL/model ID کے editable fields نہ ہوں۔ صرف OpenRouter API key ایک field میں درج ہو؛ `Connect & load models` اصل OpenRouter model catalog کو اسی key کے ساتھ fetch کر کے key کو تبھی SecureStore میں محفوظ کرے جب catalog/auth کامیاب ہوں۔ Existing chat-model choice اور transcription-model choice الگ منتخب ہوں؛ IDs اندرونی طور پر محفوظ ہوں، UI صارف کو model names دکھائے۔
+- Chat text model list کے لیے authenticated `GET https://openrouter.ai/api/v1/models` سے `data` پڑھے؛ `data.id`, `name`, architecture modalities اور قیمت جیسے دستیاب metadata سے searchable picker بنے۔ Photo filter انہی models پر لگے جن کے `architecture.input_modalities` میں `image` ہو۔ Voice transcription کے لیے اسی key سے `GET /models?output_modalities=transcription` لے کر الگ searchable list بنے۔ Catalog بڑا ہو سکتا ہے؛ اسے screen-local/cache memory میں رکھا جائے، preference database میں پوری catalog نہیں۔
+- Model selection display-name پر ہو مگر اصل `id` صرف request میں جائے اور عام picker، Settings یا Action Timeline میں خام ID نہ دکھے۔ selected name/id local preferences میں محفوظ ہوں۔ “Models loaded” کا مطلب catalogue حاصل ہوا ہے، یہ ہر model کی user quota/access کی ضمانت نہیں؛ inference compatibility/billing اصل request پر provider طے کرتا ہے اور app صاف error دے۔ Model selection blank ہو تو send/transcribe کرنے سے پہلے Settings میں chooser کھلے؛ guessed success یا fallback model نہ ہو۔
+- Chat request fixed `https://openrouter.ai/api/v1/chat/completions` پر جائے۔ Existing Stop/cancel، local Action Timeline، system/prompt construction اور source/attachment processing برقرار ہوں۔ Local event text، SecureStore keys اور local file paths provider payload میں نہ جائیں۔
+- Vision کے لیے صارف کی local image base64 `image_url` multipart content میں صرف image-capable selected model کو بھیجی جائے۔ Image ہے مگر منتخب model image input support نہیں کرتا تو درخواست network پر بھیجنے سے پہلے واضح model-selection ہدایت دکھے۔
+- Voice recording یا picked audio کے لیے OpenRouter `POST /audio/transcriptions` میں multipart `file` + منتخب transcription `model` اور وہی SecureStore key استعمال ہو۔ زیادہ سے زیادہ 20 MB کی موجودہ UI limit برقرار رہے۔ Transcript خودبخود submit نہ ہو؛ composer میں آ کر صارف کے جائزے کا منتظر ہو؛ stop/error/timeline برقرار ہوں اور کامیاب transcript کے بعد temporary recording copy حذف ہو۔
+- Connect action صرف model list retrieval کرے؛ text inference صرف user Send پر ہو، اور UI model generation کے ممکنہ provider charges بتائے۔ Key کبھی history، logs، AsyncStorage یا error text میں نہ ہو۔ Browser preview memory-only رہے۔
 
-### Stage 2 — منتخب web اور media صلاحیتیں
+### Accounts — محدود GitHub profile connection
 
-- DuckDuckGo public HTML سے محدود web search؛ اصل source URL/title محفوظ، chat میں tappable links؛ search failure پر کوئی نتیجہ ایجاد نہ ہو۔
-- Public HTTPS HTML/text/JSON/XML صفحات کو fetch کر کے bounded text excerpt app documents میں `.txt` صورت محفوظ کریں اور صرف صارف کے task run کرنے پر اس excerpt کو configured model کے ساتھ بھیجیں۔ Login-required pages، PDF/binary parsing اور نجی account browsing شامل نہیں۔
-- Gallery یا document picker میں صارف کے منتخب کردہ زیادہ سے زیادہ چار queued inputs؛ images کو chat میں 80 × 80 compact thumbnails کی صورت دکھائیں، tap پر full-size modal preview کھولیں، مگر model کو اصل منتخب image ہی بھیجیں۔ Images کو OpenAI-compatible `image_url` data URL صورت میں اور منتخب text/Markdown/CSV/JSON/XML/HTML files کو bounded text context صورت میں بھیجیں۔ Image کے لیے provider کا vision model درکار ہے۔
-- Voice صرف صارف کے اختیار سے: microphone permission record دبانے کے بعد، یا الگ audio-file picker؛ optional HTTPS `/audio/transcriptions` endpoint/model اور موجود secure key؛ زیادہ سے زیادہ 20 MB؛ transcript send سے پہلے composer میں review کے لیے آئے۔ کامیاب transcription کے بعد temporary audio copy حذف ہو۔
+- Composer کے GitHub logo اور Settings کے ذریعے الگ Accounts panel دستیاب ہو، جہاں GitHub account “Connect” اور بعد میں connected username/avatar یا واضح disconnected state نظر آئے۔
+- Connector صارف کا GitHub personal access token خود panel میں لے، صرف authenticated `GET https://api.github.com/user` سے key/profile validate کرے، پھر token کو API key سے الگ SecureStore record میں محفوظ کرے۔ Invalid token پر اسے محفوظ نہ کرے؛ failure میں صاف وجہ/دوبارہ کوشش دکھائے۔ Web Preview token صرف memory میں رہے۔ Disconnect صرف ایپ سے credential مٹائے؛ GitHub token خود revoke کرنے کا دعویٰ نہ کرے۔
+- اس مرحلے کا GitHub اتصال صرف profile identity check ہے؛ repository contents، issues، commits، write operations، GitHub OAuth یا YouTube access فعال نہیں۔ Repository permission نہ مانگیں۔ مستقبل کی ہر repository/action capability الگ کم سے کم permissions اور per-action منظوری کے بعد ہوگی۔
 
-### Stage 3 — محدود، واضح assistant workflows
+### Assistant UI، research اور rendered replies
 
-- Bounded web research → source retrieval → prompt preparation → chosen model dispatch → answer pipeline؛ ہر حقیقی retrieval/preparation/dispatch/result/error/stop الگ compact timeline event ہو۔
-- Document/image QA اسی explicit composer action سے ہو۔ Voice transcript خودکار طور پر submit نہ ہو؛ صارف review کے بعد Send دبائے۔
-- Stop سے in-flight request بند ہو۔ کوئی generic autonomous agent، background job after screen lock، GitHub/YouTube account action، یا consequential external write اس release میں نہیں۔
+- موجودہ public-web search/page analysis، bounded excerpts، source links، image/document handling، audio transcription، compact thumbnails اور full-screen image preview کام کرتے رہیں۔ Model answers کو MIT-licensed `react-native-enriched-markdown` native renderer میں GitHub-flavored Markdown کے طور پر دکھائیں؛ inline links HTTPS validation کے بعد کھلیں، code/table/list styling Raabta palette سے میل کھائے، اور Urdu RTL برقرار رہے۔ Code-highlighting download، LaTeX/math asset اور video support compile نہ کریں تاکہ غیر استعمال شدہ native dependencies/APK size نہ بڑھے۔
+- Chat timeline حقیقی مراحل دکھاتا رہے: search/page retrieval، attachment preparation، selected model dispatch، جواب، transcription، stop اور failure۔ صرف حقیقی ہوئی کارروائی دکھائیں۔
+- Roadmap میں موجود assistant اور permissioned-agent مرحلے کی حد باقی رہے؛ فائل download کی صرف supported public text/image/JSON/XML/HTML capabilities کا دعویٰ ہو۔
 
-### Stage 4 — ابھی مستقبل کا مرحلہ
+## موجودہ project structure اور ذمہ داریاں
 
-GitHub/YouTube یا دیگر account connections، OAuth، MCP/tool server integrations اور account actions ابھی شامل نہیں۔ انہیں الگ قدم میں least-privilege scope، secrets، explicit authorization اور per-action user approval کے ساتھ بنانا ہو گا۔ یہ GitHub source repository publish کرنے سے الگ فیچر ہے: repository عام public source export ہے، app کے اندر GitHub connection نہیں۔
-
-## موجودہ project structure
-
-- `app/`: Expo Router shell اور React Native UI؛ chat, history, roadmap, research/media, settings, temporary API-key reveal toggle, explicit provider-test action, compact image/lightbox preview.
-- `lib/chat-storage.ts`: versioned local thread, message, attachment, activity اور non-secret preference schemas.
-- `lib/secure-credentials.ts`: native SecureStore اور Web Preview session-memory key adapter.
-- `lib/ai-client.ts`: provider-neutral HTTPS text/image request، optional multipart audio transcription، cancellation اور sanitized provider errors.
-- `lib/provider-messages.ts`: untrusted text/source excerpts اور vision payload کو provider request میں تبدیل کرتا ہے؛ local action logs/path واپس model کو نہیں بھیجتا.
-- `lib/mobile-media.ts`, `lib/audio-tools.ts`, `lib/web-tools.ts`: permission-on-demand pickers, bounded local text/image/audio preparation، public HTTPS search/download/read.
-- `components/`, `hooks/`, `server/`, `drizzle/`, `shared/`: موجود fixed managed Expo Mobile starter foundations؛ Raabta chat خود login/backend کا تقاضا نہیں کرتی.
-- `assets/images/`, `scripts/generate_brand_assets.py`: original paired-arc Raabta identity اور reproducible native Android/web icon, splash variants.
-- `.github/workflows/android-apk.yml`: pinned GitHub Actions workflow for Expo prebuild → Gradle debug APK → 30-day downloadable artifact (no EAS token).
-- `README.md`, `LICENSE`, `TODO.md`: bilingual open-source handoff, actual support boundaries, MIT license, deliverables.
+- `app/(tabs)/index.tsx`: fixed Expo Router home، Chat/History/Roadmap/Research/Settings panels، composer integration، settings/account/model picker launch، thread lifecycle اور Action Timeline۔ نئی UI sheets reusable components میں ہوں گی تاکہ screen file مزید غیر ضروری نہ پھیلے۔
+- `components/raabta/`: reusable typed `ModelPicker`, `AccountsSheet` اور `AttachmentSheet` panels؛ `app/(tabs)/index.tsx` composer icons کو existing send/voice state کے ساتھ رکھتا ہے تاکہ دو الگ tool rails نہ بنیں۔
+- `lib/chat-storage.ts`: AsyncStorage thread/preferences schema؛ English-first `DEFAULT_PREFERENCES`، selected model names/IDs اور language choice، secret data نہیں۔ پرانا thread history شکل بدلے بغیر رہے۔
+- `lib/secure-credentials.ts`: Expo SecureStore میں OpenRouter API key اور الگ GitHub token؛ web پر session-memory adapters؛ کوئی credential عام JSON/preferences میں نہیں۔
+- `lib/openrouter.ts` اور `lib/ai-client.ts`: authenticated model discovery، safe catalog parsing، fixed OpenRouter chat-completion/transcription routes، capability guard، request cancellation اور sanitized errors۔
+- `lib/github-account.ts`: GitHub `/user` profile check اور safe minimal profile parsing؛ repo endpoints نہیں۔
+- `lib/provider-messages.ts`, `lib/audio-tools.ts`, `lib/mobile-media.ts`, `lib/web-tools.ts`: موجود source-aware question/media context، bounded input، photo payload، local audio handling اور public-web research۔
+- `app.config.ts`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`: existing Expo 57 / React Native 0.86 native config برقرار؛ MIT renderer configuration، optional native assets off، اور install-script allowlist۔
+- `.github/workflows/android-apk.yml`: existing workflow app/lib/components/lockfile/workspace changes پر trigger ہو؛ Gradle release APK، bundle inclusion check اور public GitHub Actions artifact۔
+- `README.md`, `TODO.md`, `LICENSE`: public open-source handoff، provider/key/account privacy limits، model/audio setup، current outcomes اور staged roadmap.
 
 ## Design direction
 
 ### زیرِ غور directions
 
-- گرم ivory/ink سطحیں، deep teal brand، airy editorial chat، بہت کم chrome (**quiet editorial chat**) — 6.4%.
-- Navy command console، نیون edging اور dense controls — 2.7%.
-- Pastel gradient bubbles اور mascot-led layout — 8.1%.
+- گرم ivory/ink سطحیں، deep teal brand، airy editorial chat اور screenshot سے مطابقت رکھنے والا inline action rail (**quiet editorial chat**) — 6.4%۔
+- Navy command console، neon edging اور dense controls — 2.7%۔
+- Pastel gradient bubbles اور mascot-led layout — 8.1%۔
 
-منتخب: **Quiet editorial chat**.
+منتخب: **Quiet editorial chat**؛ موجودہ identity اور فراہم کردہ reference کو برقرار رکھا جائے گا۔
 
-- **Design Movement:** editorial minimalism کو one-hand native chat پر لاگو کرنا۔
+- **Design Movement:** editorial minimalism کو one-hand Android chat میں نافذ کرنا، اور toolbar کو message composer کے اندر رکھنا۔
 - **Core Principles:** گفتگو سب سے مقدم؛ ایک ہاتھ سے navigation؛ privacy واضح؛ action feedback سچا۔
 - **Color Philosophy:** ivory طویل Urdu/English متن کے لیے نرم؛ charcoal contrast؛ deep teal اعتماد اور شناخت؛ sage ثانوی status۔
-- **Layout Paradigm:** اوپر compact identity، ایک مرکزی vertical conversation، compact action rail، نیچے fixed composer اور مختصر navigation؛ dashboard grid نہیں۔
-- **Signature Elements:** paired speech/connection arcs؛ local-state کا teal dot؛ باریک paper-like separators۔
-- **Interaction Philosophy:** ہر tap کا واضح نتیجہ؛ progress/event/error/stop candid؛ file/key user کے اختیار میں؛ مستقبل کے external action کے لیے منظوری۔
-- **Animation:** loading میں ہلکی pulse، transitions تقریباً 160–220ms؛ reduce-motion اختیار کا احترام، send/stop کبھی block نہ ہو۔
-- **Typography System:** platform system sans اور Urdu glyph fallback؛ message text 15–17px with آرام دہ line height؛ metadata 10–13px؛ مختصر headlines 24–32px۔
+- **Layout Paradigm:** compact top identity/model indicator، ایک مرکزی vertical conversation، نیچے rounded message field کے بالکل بعد screenshot جیسی icon strip، مختصر bottom navigation؛ dashboard grid نہیں۔
+- **Signature Elements:** paired speech/connection arcs؛ local-state کا teal dot؛ باریک paper-like separators اور pill status۔
+- **Interaction Philosophy:** ہر tap کا واضح نتیجہ؛ progress/event/error/stop candid؛ files/keys user کے اختیار میں؛ حسابات profile-only اور آئندہ external actions اجازت طلب ہوں۔
+- **Animation:** loading میں ہلکی pulse، chooser/sheet transitions تقریباً 160–220ms؛ reduce-motion کا احترام، send/stop کبھی block نہ ہوں۔
+- **Typography System:** platform system sans اور Urdu glyph fallback؛ message text 15–17px with آرام دہ line height؛ metadata 10–13px؛ مختصر headlines 24–32px۔ Markdown headings/code/tables متن پر غالب نہ ہوں۔
 - **Brand Essence:** صارف کے اپنے model کے لیے پُرسکون نجی رابطہ؛ direct، calm، trustworthy۔
-- **Brand Voice:** bilingual مگر مختصر، دعوے حقیقت کے مطابق۔ مثالیں: “اپنی گفتگو شروع کریں — Start a conversation.” اور “اپنا model جوڑیں؛ key آپ کے اختیار میں ہے.”
+- **Brand Voice:** bilingual مگر مختصر، دعوے حقیقت کے مطابق۔ مثالیں: “اپنی گفتگو شروع کریں — Start a conversation.” اور “اپنا OpenRouter key جوڑیں؛ model آپ منتخب کریں.”
 - **Wordmark & Logo:** original paired-arc connection mark؛ چھوٹے icon میں mark اکیلا، interface میں Raabta wordmark۔
 - **Signature Brand Color:** deep teal `#0F766E`۔
 
+## بیرونی تکنیکی حوالہ جات
+
+- OpenRouter model listing, `GET /models`, auth، metadata: https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties
+- OpenRouter transcription endpoint، transcription model discovery، multipart upload: https://openrouter.ai/docs/guides/overview/multimodal/stt
+- OpenRouter image input payload اور compatibility: https://openrouter.ai/docs/guides/overview/multimodal/image-understanding
+- Software Mansion React Native Enriched Markdown 1.1.x، Android New Architecture، React Native 0.86 support، GFM، RTL، links: https://github.com/software-mansion/enriched-markdown/tree/main/packages/react-native-enriched-markdown
+- GitHub authenticated user API: https://docs.github.com/en/rest/users/users#get-the-authenticated-user
+
 ## حدود اور ریلیز
 
-Provider account/API key اس task میں نہیں دیا گیا، اس لیے production-model success verify نہیں۔ Provider compatibility، rate limit، billing، retention اور vision/audio support provider پر منحصر ہیں۔ AsyncStorage app sandbox-local ہے، الگ سے encrypted نہیں؛ key الگ SecureStore میں۔ Web Preview browsers external CORS کی پابندی لگا سکتے ہیں؛ target Android native ہے۔ Files کے supported formats/size limits UI اور README میں صاف بتائے جائیں۔
+Provider account/API key اس task میں نہیں دیا گیا، اس لیے live model answer، vision request، transcription، quota/billing یا provider-specific access کی تصدیق نہیں ہو سکتی۔ OpenRouter catalogue request صرف authentication اور model metadata retrieval کی جانچ کرتی ہے؛ ہر catalog item صارف کے منصوبے/علاقے پر دستیاب ہونے کی ضمانت نہیں۔ GitHub token بھی فراہم نہیں؛ profile connection user خود app میں کرے گا۔ AsyncStorage app sandbox-local ہے، الگ سے encrypted نہیں؛ keys SecureStore میں الگ ہیں۔ Web Preview میں external CORS/browser policy رکاوٹ بن سکتی ہے؛ target Android native ہے۔
 
-Public GitHub source export الگ external action ہے؛ source snapshot secret-scrubbed ہونا چاہیے اور Manus-managed canonical repository تبدیل نہ ہو۔ Android self-contained test APK public repo کے GitHub Actions workflow سے بنتا ہے: Expo prebuild، Gradle `assembleRelease`، پھر APK کے اندر `assets/index.android.bundle` کی لازم جانچ تاکہ installed app کو Metro نہ چاہیے ہو۔ Artifact کامیابی سے upload/download ہونے کے بعد ہی APK deliverable مکمل شمار ہو گا۔ یہ Expo کی default Android debug key سے sideload test build ہے، Google Play signing نہیں۔ Sandbox/Metro/Web screenshot APK نہیں۔
+Mobile starter کا canonical remote Manus-managed ہی رہے گا؛ اس کی `main` سے user-authorized secret-scrubbed snapshot public GitHub repository `ziakhalid236/raabta-ai` میں update ہوگی۔ GitHub Actions میں موجود Expo prebuild → Gradle `assembleRelease` → `assets/index.android.bundle` verification → APK artifact flow استعمال ہوگا۔ Fresh APK اسی public repo release workflow کے کامیاب artifact کے بعد deliverable شمار ہو گا۔ یہ default Android test/debug signing ہے، Play Store signing نہیں۔ Native device verification اس cloud session سے ثابت نہیں ہوتی۔

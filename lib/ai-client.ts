@@ -7,6 +7,9 @@ export type ChatRequestMessage = {
   content: string | ChatContentPart[];
 };
 
+const CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+const AUDIO_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
+
 export class AIRequestError extends Error {
   constructor(
     message: string,
@@ -17,18 +20,16 @@ export class AIRequestError extends Error {
   }
 }
 
-/** Send only user/assistant content to a user-configured HTTPS completion endpoint. */
+/** Send only user/assistant content to the fixed OpenRouter chat-completions route. */
 export async function requestChatCompletion(args: {
-  endpointUrl: string;
   modelId: string;
   apiKey: string;
   messages: ChatRequestMessage[];
   signal: AbortSignal;
 }): Promise<string> {
-  const endpoint = parseHttpsEndpoint(args.endpointUrl, "chat-completions");
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(CHAT_COMPLETIONS_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -43,7 +44,7 @@ export async function requestChatCompletion(args: {
   } catch (error) {
     if (args.signal.aborted) throw error;
     throw new AIRequestError(
-      "Could not reach the endpoint. Check your connection and endpoint URL, then try again.",
+      "Could not reach OpenRouter. Check your internet connection and try again.",
     );
   }
 
@@ -64,21 +65,19 @@ export async function requestChatCompletion(args: {
       : "";
   if (!answer) {
     throw new AIRequestError(
-      "The endpoint response did not contain a text answer. Check model compatibility.",
+      "The selected OpenRouter model did not return a text answer. Choose another catalog model and try again.",
     );
   }
   return answer;
 }
 
-/** Send a user-selected or recorded audio file to their optional transcription endpoint. */
+/** Send a user-selected or recorded audio file to OpenRouter speech transcription. */
 export async function requestAudioTranscription(args: {
-  endpointUrl: string;
   modelId: string;
   apiKey: string;
   file: { uri: string; name: string; mimeType: string; webFile?: Blob };
   signal: AbortSignal;
 }): Promise<string> {
-  const endpoint = parseHttpsEndpoint(args.endpointUrl, "audio-transcription");
   const form = new FormData();
   form.append("model", args.modelId.trim());
   const upload =
@@ -89,7 +88,7 @@ export async function requestAudioTranscription(args: {
 
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(AUDIO_TRANSCRIPTIONS_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${args.apiKey}` },
       body: form,
@@ -98,7 +97,7 @@ export async function requestAudioTranscription(args: {
   } catch (error) {
     if (args.signal.aborted) throw error;
     throw new AIRequestError(
-      "Could not reach the transcription endpoint. Check the optional speech settings and connection.",
+      "Could not reach OpenRouter speech transcription. Check your connection and selected transcription model.",
     );
   }
   const payload: unknown = await response.json().catch(() => null);
@@ -108,30 +107,8 @@ export async function requestAudioTranscription(args: {
     typeof (payload as { text?: unknown }).text === "string"
       ? (payload as { text: string }).text.trim()
       : "";
-  if (!text) throw new AIRequestError("The transcription endpoint returned no readable text.");
+  if (!text) throw new AIRequestError("OpenRouter returned no readable transcription text. Check the selected speech model.");
   return text;
-}
-
-function parseHttpsEndpoint(value: string, purpose: string): string {
-  try {
-    const parsed = new URL(value.trim());
-    const sensitiveQuery = [...parsed.searchParams.keys()].some((key) =>
-      /key|token|secret|auth|credential/i.test(key),
-    );
-    if (
-      parsed.protocol !== "https:" ||
-      !parsed.hostname ||
-      parsed.username ||
-      parsed.password ||
-      sensitiveQuery
-    )
-      throw new Error("invalid");
-    return parsed.toString();
-  } catch {
-    throw new AIRequestError(
-      `Use a complete HTTPS ${purpose} URL without credentials in the URL.`,
-    );
-  }
 }
 
 function responseError(status: number): AIRequestError {
@@ -139,13 +116,13 @@ function responseError(status: number): AIRequestError {
     400: "The provider could not accept this request (400). Check model and image/audio compatibility.",
     401: "The provider rejected the API key (401). Check or replace it in Settings.",
     403: "The provider denied this request (403). Check the key's permissions and model access.",
-    404: "The endpoint or model was not found (404). Check both values in Settings.",
+    404: "OpenRouter could not find the selected model (404). Choose another from the model catalog.",
     413: "The provider says this image or recording is too large (413). Try a smaller file.",
     429: "The provider rate limit or quota was reached (429). Try again later or check your plan.",
   };
   return new AIRequestError(
     messages[status] ??
-      `The provider returned HTTP ${status}. Check endpoint, model, file compatibility, and provider status.`,
+      `OpenRouter returned HTTP ${status}. Check the selected model, file compatibility, and account status.`,
     status,
   );
 }

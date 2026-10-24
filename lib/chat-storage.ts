@@ -30,23 +30,34 @@ export type ChatThread = {
 
 export type ChatPreferences = {
   language: "ur" | "en";
-  endpointUrl: string;
+  openRouterConnected: boolean;
   modelId: string;
-  transcriptionEndpointUrl: string;
+  modelName: string;
+  modelSupportsImages: boolean;
   transcriptionModelId: string;
+  transcriptionModelName: string;
+  githubLogin: string;
+  githubAvatarUrl: string;
 };
 
 const THREADS_KEY = "raabta.chat.threads.v2";
 const LEGACY_THREADS_KEY = "raabta.chat.threads.v1";
-const PREFERENCES_KEY = "raabta.chat.preferences.v2";
-const LEGACY_PREFERENCES_KEY = "raabta.chat.preferences.v1";
+const PREFERENCES_KEY = "raabta.chat.preferences.v3";
+const LEGACY_PREFERENCES_KEYS = [
+  "raabta.chat.preferences.v2",
+  "raabta.chat.preferences.v1",
+];
 
 export const DEFAULT_PREFERENCES: ChatPreferences = {
-  language: "ur",
-  endpointUrl: "",
+  language: "en",
+  openRouterConnected: false,
   modelId: "",
-  transcriptionEndpointUrl: "",
+  modelName: "",
+  modelSupportsImages: false,
   transcriptionModelId: "",
+  transcriptionModelName: "",
+  githubLogin: "",
+  githubAvatarUrl: "",
 };
 
 export async function loadThreads(): Promise<ChatThread[]> {
@@ -76,23 +87,37 @@ export async function saveThreads(threads: ChatThread[]): Promise<void> {
 
 export async function loadPreferences(): Promise<ChatPreferences> {
   let stored = await AsyncStorage.getItem(PREFERENCES_KEY);
-  if (!stored) stored = await AsyncStorage.getItem(LEGACY_PREFERENCES_KEY);
+  let isCurrentSchema = Boolean(stored);
+  if (!stored) {
+    for (const key of LEGACY_PREFERENCES_KEYS) {
+      stored = await AsyncStorage.getItem(key);
+      if (stored) break;
+    }
+  }
   if (!stored) return DEFAULT_PREFERENCES;
   try {
-    const parsed = JSON.parse(stored) as Partial<ChatPreferences>;
+    const parsed: unknown = JSON.parse(stored);
+    const data = asRecord(parsed);
+    if (!data) return DEFAULT_PREFERENCES;
     return {
-      language: parsed.language === "en" ? "en" : "ur",
-      endpointUrl:
-        typeof parsed.endpointUrl === "string" ? parsed.endpointUrl : "",
-      modelId: typeof parsed.modelId === "string" ? parsed.modelId : "",
-      transcriptionEndpointUrl:
-        typeof parsed.transcriptionEndpointUrl === "string"
-          ? parsed.transcriptionEndpointUrl
-          : "",
-      transcriptionModelId:
-        typeof parsed.transcriptionModelId === "string"
-          ? parsed.transcriptionModelId
-          : "",
+      language: data.language === "ur" ? "ur" : "en",
+      // Old custom-provider keys/model IDs must be explicitly reconnected to OpenRouter.
+      openRouterConnected:
+        isCurrentSchema && data.openRouterConnected === true,
+      modelId: isCurrentSchema ? stringValue(data.modelId) : "",
+      modelName: isCurrentSchema ? stringValue(data.modelName) : "",
+      modelSupportsImages:
+        isCurrentSchema && data.modelSupportsImages === true,
+      transcriptionModelId: isCurrentSchema
+        ? stringValue(data.transcriptionModelId)
+        : "",
+      transcriptionModelName: isCurrentSchema
+        ? stringValue(data.transcriptionModelName)
+        : "",
+      githubLogin: isCurrentSchema ? stringValue(data.githubLogin) : "",
+      githubAvatarUrl: isCurrentSchema
+        ? safeHttpsString(data.githubAvatarUrl)
+        : "",
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -172,4 +197,24 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
       (typeof item.extractedText === "string" &&
         item.extractedText.length <= 120_000))
   );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function safeHttpsString(value: unknown): string {
+  if (typeof value !== "string") return "";
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" ? value : "";
+  } catch {
+    return "";
+  }
 }

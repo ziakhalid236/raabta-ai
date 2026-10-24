@@ -1,47 +1,50 @@
 # Raabta AI (رابطہ)
 
-**Your AI, your way. — آپ کا AI، آپ کے اختیار میں۔** Raabta is an Android-first AI chat app built on Expo, React Native and Expo Router. Its calm ivory-and-teal interface opens in Urdu with a saved English/Urdu switch and right-to-left text direction, and is designed for one-hand use. It reuses established open-source mobile packages rather than introducing a custom runtime.
+**Your AI, your way. — آپ کا AI، آپ کے اختیار میں۔** Raabta is an Android-first, local-first AI chat app built with Expo, React Native and Expo Router. Fresh installs open in English, with a saved English/Urdu switch and automatic text direction for Urdu/RTL. The quiet ivory-and-teal interface is designed for one-hand use and reuses established open-source mobile components.
 
 ## Current capabilities
 
-### Stage 1 — Chat
+### Stage 1 — Chat with your chosen model
 
-Configure your own complete HTTPS OpenAI-compatible Chat Completions URL, model ID and API key. Raabta sends prompts directly from the device to the endpoint you chose. It never fabricates a response: without a working provider configuration, the UI asks you to configure one or shows the actual request error. Start, reopen and resume conversations; stop an in-flight request; and see real request progress/results in the thread.
+Connect one OpenRouter API key, load OpenRouter's model catalog and select a chat model by its displayed name. Raabta stores the selected model's internal ID locally for requests, while normal controls and the Action Timeline show its display name only. You do not type a provider URL or model ID. The catalog request does not send a test prompt or run inference. A catalog listing is not a guarantee that the model is enabled or available to your OpenRouter account. Send a real question to test inference; the selected provider/model may charge for it.
+
+Start, reopen and resume locally stored conversations, stop an in-flight request, and see real preparation, retrieval, model dispatch, answer, failure and stop events in the persistent Action Timeline. Without a connected key/model or after an API error, Raabta shows an honest setup/error state rather than inventing an answer.
 
 ### Stage 2 — Selected research and media
 
 - Search public web results using DuckDuckGo's HTML search page. A successful search attaches up to six real source URLs to the chat; search errors return no invented citations.
-- Enter a public HTTPS URL to download and read a bounded text excerpt from HTML, text, JSON or XML, save a `.txt` rendition in app-private documents and ask your configured model about it. Pages over 4 MB are rejected; the model receives at most 35,000 extracted characters. Login-required sites, PDF/binary extraction and private account browsing are not supported.
-- Choose up to four combined image/document attachments from the gallery or system file picker, then send them explicitly in chat. Chat images appear as compact 80 × 80 previews; tap one to view it full-size. This changes only the display: the selected original image is still sent to the provider. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters. Visual Q&A requires the chosen endpoint/model to support OpenAI-compatible `image_url` content.
-- Record a short voice message after granting microphone permission, or select an audio file. Configure the optional HTTPS audio-transcription endpoint and model in Settings; audio uploads are limited to 20 MB and use the API key stored separately. A transcript is placed in the composer for you to review; Raabta does not send it automatically.
+- Enter a public HTTPS URL to read a bounded excerpt from supported HTML, text, JSON or XML, save a `.txt` rendition in app-private documents and ask your selected model about it. Pages over 4 MB are rejected; the model receives at most 35,000 extracted characters. Login-required sites, PDF/binary extraction and private account browsing are not supported.
+- Choose up to four combined image/document attachments from the gallery or system file picker. Compact image thumbnails can be opened full-size. Image questions require a selected model whose OpenRouter catalog metadata lists `image` input; unsupported image requests are blocked before network dispatch. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters.
+- Record a voice message after granting microphone permission, or select an audio file. Choose an optional transcription model discovered from OpenRouter's transcription catalog; it uses the same OpenRouter key. Audio uploads are limited to 20 MB. The transcript returns to the composer for review and is never sent automatically.
+- Assistant answers render as GitHub-flavored Markdown with branded headings, lists, tables and code. Safe HTTPS links can be opened from an answer.
 
 ### Stage 3 — Bounded assistant tasks
 
-Web research, source retrieval, local attachment preparation and model answering are wired as an explicitly user-triggered workflow. The chat shows each retrieval, preparation, model dispatch, answer, stop or failure as its own compact, persistent timeline event. Current workflows do not take account actions. This is a limited task assistant, not a general autonomous agent or a screen-lock/background worker.
+Web research, source retrieval, local attachment preparation and model answering are explicitly user-triggered workflows. The chat shows each retrieval, preparation, model dispatch, answer, stop or failure as its own compact, persistent timeline event. Current workflows do not take consequential account actions and do not continue in the background while the app is locked.
 
-### Stage 4 — Future work, not included
+### Stage 4 — Accounts: profile-only GitHub
 
-GitHub/YouTube account connections, OAuth, MCP/tool connectors and permissioned external actions are not implemented. Publishing this source to GitHub is separate from connecting an account inside Raabta. The public source repository is [github.com/ziakhalid236/raabta-ai](https://github.com/ziakhalid236/raabta-ai). Agent/account functionality must be added in a later version with least-privilege scopes and explicit approval for every consequential action.
+The GitHub icon in the composer opens **Accounts**. Users may provide their own GitHub personal access token to check the authenticated profile (`GET https://api.github.com/user`). The app saves the token separately from the OpenRouter key only after a successful profile check, and displays the returned login/avatar. This connection does **not** grant or use repository access; Raabta does not read repositories, issues, or commits, and does not perform GitHub writes. Disconnect removes the token from Raabta but does not revoke the token at GitHub. Do not grant repository permissions for this profile-only feature.
+
+YouTube, MCP servers, GitHub repository tools and other external actions are future work. They require separate least-privilege permissions and explicit user approval before each consequential action. The public source repository is a release mirror, not an in-app account connection.
 
 ## Privacy and permissions
 
-- On Android, the provider API key is held in Expo SecureStore; it is not stored in conversation messages. Browser Preview uses session memory only.
-- Conversation history, action events, non-secret settings and app-copied attachments are stored in the device app sandbox through AsyncStorage/app documents. Local chat storage is **not separately encrypted by Raabta**; use the device's screen lock.
-- Prompts and any image/document/source/audio selected for a task are transmitted to the provider endpoint you configured only when you run that task. Provider processing, billing and retention policies are outside Raabta's control.
-- A web search query is sent to DuckDuckGo. Retrieved excerpts and links are then included in the provider request you explicitly initiated.
-- Android microphone permission is requested only when you start recording. Photos are selected through the system gallery/picker. Raabta has no sign-in and no cloud chat-sync service.
+- On Android, the OpenRouter API key and GitHub profile token are held in separate Expo SecureStore entries. The app does not bundle keys or copy them into messages, chat preferences or Action Timeline records. Browser Preview keeps both credentials in session memory only.
+- Conversation history, action events, non-secret preferences, profile display details and app-copied attachments stay in the local app sandbox through AsyncStorage/app documents. Chat storage is **not separately encrypted by Raabta**; use the device's screen lock.
+- Prompts and any image/document/source/audio selected for a task are transmitted to OpenRouter only when you explicitly run the task. OpenRouter/provider processing, billing and retention policies are outside Raabta's control.
+- A web search query is sent to DuckDuckGo. Retrieved excerpts and links are then included in the OpenRouter request you explicitly initiated.
+- GitHub is contacted only when you press Connect; the profile-only connection calls GitHub's authenticated `/user` endpoint. Disconnect deletes the app's stored credential, not the remote GitHub token.
+- Android microphone permission is requested only when you start recording. Images and documents are selected through the system picker. Raabta has no sign-in and no cloud chat-sync service.
 
-## Configure an AI provider
+## Connect OpenRouter
 
-Open **Settings** and enter:
+1. Create an OpenRouter API key at [openrouter.ai/keys](https://openrouter.ai/keys).
+2. Open **Settings**, paste the key and choose **Connect & load models**. Raabta requests the catalog only; it does not send a billable test prompt. On Android, the key is stored in SecureStore only after the catalog request succeeds.
+3. Choose a chat model by name from the discovered list. Use the image-capable filter if you plan to ask questions about photos. If you use voice, separately choose a transcription model from the transcription catalog.
+4. Send a question when ready. Provider/model access, quotas and charges are determined by OpenRouter and your account. Check the model's current pricing and access before sending sensitive, long or billable content.
 
-1. The full HTTPS chat-completions endpoint (for example, `https://provider.example/v1/chat/completions`); do not place API secrets in the URL.
-2. The exact model identifier your provider expects.
-3. Your provider-issued API key.
-
-Settings also include a temporary key show/hide control and an explicit **Test connection** button. The test sends only a short “OK” prompt using the current endpoint/model and saved or draft key. It does not save drafts; press **Save on this device** separately. Your provider may charge for the request.
-
-For voice transcription only, also enter the provider's compatible HTTPS audio transcription endpoint and model. Raabta does not bundle keys or select a provider account. Image questions require a vision-capable model.
+You never need to enter a model ID manually. Existing custom-provider keys from older app versions are not silently sent to OpenRouter; enter the intended OpenRouter key again to connect.
 
 ## Develop and check
 
@@ -51,9 +54,10 @@ This project retains the managed Expo Mobile starter and its pinned `pnpm-lock.y
 pnpm install --frozen-lockfile
 pnpm check
 pnpm lint
+pnpm test
 ```
 
-The project uses Expo Router / React Native with local helpers in `lib/`. Native device features must be checked on an actual Android device; a web screenshot is not proof that microphone permissions, SecureStore or picker behavior works on every device.
+The project uses Expo Router / React Native with local helpers in `lib/` and reusable panels in `components/raabta/`. Native device features must be checked on an actual Android device; TypeScript checks and Expo Web Preview alone do not prove that SecureStore, microphone permissions, recording or picker behavior works on every device.
 
 ## Android test APK (self-contained)
 
@@ -61,4 +65,4 @@ The public repository includes `.github/workflows/android-apk.yml`. A push to `m
 
 ## Open source
 
-Raabta is released under the MIT License (see [`LICENSE`](LICENSE)). Third-party packages retain their own terms. The public GitHub repository is a sanitized source export that excludes Manus initialization metadata; Manus remains the managed project's canonical source, and the GitHub export does not connect an account inside Raabta.
+Raabta is released under the MIT License (see [`LICENSE`](LICENSE)). Third-party packages retain their own terms. The public GitHub repository is a sanitized source export that excludes Manus initialization metadata; Manus remains the managed project's canonical source.
