@@ -21,7 +21,7 @@ Web research, source retrieval, local attachment preparation and model answering
 
 ### Stage 4 — Future work, not included
 
-GitHub/YouTube account connections, OAuth, MCP/tool connectors and permissioned external actions are not implemented. Publishing this source to GitHub is separate from connecting a GitHub account inside Raabta. Agent/account functionality must be added in a later version with least-privilege scopes and explicit approval for every consequential action.
+GitHub/YouTube account connections, OAuth, MCP/tool connectors and permissioned external actions are not implemented. Publishing this source to GitHub is separate from connecting an account inside Raabta. The public source repository is [github.com/ziakhalid236/raabta-ai](https://github.com/ziakhalid236/raabta-ai). Agent/account functionality must be added in a later version with least-privilege scopes and explicit approval for every consequential action.
 
 ## Privacy and permissions
 
@@ -59,4 +59,4 @@ The managed Mobile project's Android APK/AAB is built from the project's **Dashb
 
 ## Open source
 
-Raabta is released under the MIT License (see [`LICENSE`](LICENSE). Third-party packages retain their own terms. The managed Mobile project keeps its Manus-managed canonical source; a public GitHub repository, if created, is a separate sanitized source export and not an in-app GitHub connection.
+Raabta is released under the MIT License (see [`LICENSE`](LICENSE)). Third-party packages retain their own terms. The public GitHub repository is a sanitized source export that excludes Manus initialization metadata; Manus remains the managed project's canonical source, and the GitHub export does not connect an account inside Raabta.

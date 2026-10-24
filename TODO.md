@@ -15,9 +15,9 @@
 - [x] **Privacy and permission boundary.** Android API keys use SecureStore and are never included in chat history; Web Preview keeps them in session memory only. Chat/action history and non-secret preferences use device-local app storage, which is not separately encrypted by Raabta. The app discloses provider and DuckDuckGo transmissions, requests only feature-required runtime media permission, and does not claim account access.
 - [x] **Honest staged roadmap and handoff docs.** Active chat/research/limited-assistant scope is distinguished from future user-authorized GitHub/YouTube, MCP/tool and account-agent connections. README documents model/provider setup, file limits, privacy, boundaries and the managed Android build path.
 
-## Release tasks still unresolved
+## Release status
 
-- [ ] **Public GitHub source repository.** The user explicitly wants the source public and open-source, separately from in-app GitHub account connections. Verify the active authenticated GitHub connector, scan the exact export payload for secrets/private files, keep the managed Mobile project's canonical repository unchanged, then publish to the user's GitHub account. Record the real public URL only after success.
+- [x] **Public GitHub source repository.** Published the sanitized source snapshot at https://github.com/ziakhalid236/raabta-ai. The GitHub repository has a fresh public-source history; Manus initialization metadata and dotenv files were excluded. The managed Mobile project's canonical repository remains Manus-managed, and this source export does not add any in-app GitHub account connection.
 - [ ] **Native Android APK/AAB.** The source is not itself an installable APK. Save an accepted source checkpoint and use the managed project's Dashboard Android build; deliver an APK only after its actual build succeeds. No Android artifact is claimed yet.
 - [ ] **Native device verification.** Verify SecureStore, local persistence, gallery/document pickers and the recording permission flow on an actual Android build/device; Expo Web Preview and TypeScript checks alone do not prove native behavior.
 - [ ] **Live provider verification.** No provider URL/model/key was supplied. Confirm a real answer only after the user configures a compatible provider; vision and transcription also depend on the selected provider/model.
