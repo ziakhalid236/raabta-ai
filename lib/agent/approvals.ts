@@ -40,6 +40,7 @@ const TOOL_RISK: Record<string, ApprovalRisk> = {
   github_read_file: "read",
   github_list_workflow_runs: "read",
   github_get_workflow_run: "read",
+  github_list_commits: "read",
 
   ai_workspace_write_file: "write",
   ai_workspace_create_directory: "write",
@@ -47,6 +48,7 @@ const TOOL_RISK: Record<string, ApprovalRisk> = {
   github_update_file: "write",
   github_create_issue: "write",
   github_create_branch: "write",
+  github_create_repository: "write",
 
   ai_workspace_delete_file: "destructive",
   github_create_pull_request: "destructive",

@@ -17,40 +17,245 @@ export class WebToolError extends Error {
   }
 }
 
-/** Uses DuckDuckGo's public HTML results without an app-owned search key or backend. */
-export async function searchWeb(query: string, signal: AbortSignal): Promise<WebSource[]> {
+/**
+ * Providers are tried in order and the first one that yields real results wins.
+ * DuckDuckGo's HTML endpoints now answer a scripted client with an anti-bot
+ * challenge (HTTP 202 plus a CAPTCHA page) instead of results, so it can no
+ * longer be the only source. A self-hosted SearXNG instance is preferred when
+ * the user has configured one, because it is open source, needs no API key,
+ * and does not rate-limit the device.
+ */
+const SEARCH_TIMEOUT_MS = 12_000;
+
+export type WebSearchOptions = {
+  /** Base URL of a SearXNG instance, for example https://searx.example.org */
+  searxngUrl?: string;
+};
+
+export type WebSearchDiagnostics = {
+  provider: string;
+  outcome: string;
+};
+
+export class WebSearchError extends WebToolError {
+  constructor(
+    message: string,
+    readonly diagnostics: WebSearchDiagnostics[],
+  ) {
+    super(message);
+    this.name = "WebSearchError";
+  }
+}
+
+/** Bound every search request so one slow provider cannot stall a whole task. */
+async function fetchWithSearchTimeout(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal,
+): Promise<Response> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), SEARCH_TIMEOUT_MS);
+  const relay = () => timeout.abort();
+  signal.addEventListener("abort", relay, { once: true });
+  try {
+    return await fetch(url, { ...init, signal: timeout.signal });
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", relay);
+  }
+}
+
+/**
+ * Detect an anti-bot interstitial. These pages return HTTP 200/202 and are
+ * valid HTML, so without this check they look like "zero results" and the
+ * agent cannot tell a blocked search apart from a genuinely empty one.
+ */
+export function isChallengePage(html: string): boolean {
+  const lower = html.slice(0, 20_000).toLowerCase();
+  return (
+    lower.includes("unfortunately, bots use") ||
+    lower.includes("making sure you&#39;re not a bot") ||
+    lower.includes("making sure you're not a bot") ||
+    lower.includes("confirm this search was made by a human") ||
+    lower.includes("anomaly-modal") ||
+    lower.includes("/.within.website/x/xess/")
+  );
+}
+
+/** Search a SearXNG instance's JSON API. Open source and keyless. */
+export async function searchWithSearxng(
+  query: string,
+  baseUrl: string,
+  signal: AbortSignal,
+): Promise<WebSource[]> {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  if (!base) return [];
+  validatePublicHttpsUrl(base);
+  const response = await fetchWithSearchTimeout(
+    `${base}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1`,
+    { headers: { Accept: "application/json" } },
+    signal,
+  );
+  if (!response.ok)
+    throw new WebToolError(`The SearXNG instance returned HTTP ${response.status}.`);
+  const payload: any = await response.json().catch(() => null);
+  if (!Array.isArray(payload?.results))
+    throw new WebToolError(
+      "The SearXNG instance did not return JSON results. Enable the json format in its settings.yml.",
+    );
+  return payload.results.flatMap((item: any) => {
+    const url = typeof item?.url === "string" ? item.url : "";
+    const title = typeof item?.title === "string" ? item.title : "";
+    if (!url || !title) return [];
+    try {
+      return [{
+        title: title.slice(0, 180),
+        url: validatePublicHttpsUrl(url),
+        snippet:
+          typeof item?.content === "string" ? item.content.slice(0, 900) : "",
+      } satisfies WebSource];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** DuckDuckGo's classic HTML endpoint (result__a markup). */
+async function searchWithDuckDuckGoHtml(
+  query: string,
+  signal: AbortSignal,
+): Promise<WebSource[]> {
+  const html = await fetchSearchHtml(
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    signal,
+  );
+  return parseSearchResults(html);
+}
+
+/** DuckDuckGo's low-bandwidth endpoint (result-link markup). */
+async function searchWithDuckDuckGoLite(
+  query: string,
+  signal: AbortSignal,
+): Promise<WebSource[]> {
+  const html = await fetchSearchHtml(
+    `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+    signal,
+  );
+  return parseLiteSearchResults(html);
+}
+
+async function fetchSearchHtml(url: string, signal: AbortSignal): Promise<string> {
+  const response = await fetchWithSearchTimeout(
+    url,
+    {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    },
+    signal,
+  );
+  const length = Number(response.headers.get("content-length") ?? 0);
+  if (length > 4 * 1024 * 1024)
+    throw new WebToolError("The search results page was unexpectedly large.");
+  const html = await response.text();
+  if (html.length > 4 * 1024 * 1024)
+    throw new WebToolError("The search results page was unexpectedly large.");
+  if (isChallengePage(html))
+    throw new WebToolError(
+      "The search engine asked for a human-verification challenge instead of returning results.",
+    );
+  if (!response.ok)
+    throw new WebToolError(`The search provider returned HTTP ${response.status}.`);
+  return html;
+}
+
+/**
+ * Wikipedia is not a general web index, but its search API is stable, open,
+ * keyless and never challenge-gated. It is the last resort so an offline-ish
+ * or heavily rate-limited device still gets real, citable sources rather than
+ * an invented answer.
+ */
+async function searchWithWikipedia(
+  query: string,
+  signal: AbortSignal,
+): Promise<WebSource[]> {
+  const response = await fetchWithSearchTimeout(
+    `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=6&origin=*`,
+    { headers: { Accept: "application/json" } },
+    signal,
+  );
+  if (!response.ok)
+    throw new WebToolError(`Wikipedia returned HTTP ${response.status}.`);
+  const payload: any = await response.json().catch(() => null);
+  const hits = Array.isArray(payload?.query?.search) ? payload.query.search : [];
+  return hits.flatMap((hit: any) => {
+    const title = typeof hit?.title === "string" ? hit.title : "";
+    if (!title) return [];
+    const snippet = decodeEntities(stripTags(String(hit?.snippet ?? "")))
+      .replace(/\s+/g, " ")
+      .trim();
+    return [{
+      title: title.slice(0, 180),
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+      snippet: snippet.slice(0, 900),
+    } satisfies WebSource];
+  });
+}
+
+/**
+ * Search the public web for a query, trying each provider in turn. Only real
+ * parsed results are ever returned; if every provider fails, the error names
+ * what each one did so the user can act instead of guessing.
+ */
+export async function searchWeb(
+  query: string,
+  signal: AbortSignal,
+  options: WebSearchOptions = {},
+): Promise<WebSource[]> {
   const cleanQuery = query.replace(/\s+/g, " ").trim().slice(0, 300);
   if (!cleanQuery) throw new WebToolError("Enter a question or search phrase first.");
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`;
-  let html: string;
-  try {
-    const response = await fetch(url, {
-      headers: { Accept: "text/html,application/xhtml+xml" },
-      signal,
+
+  const providers: { name: string; run: () => Promise<WebSource[]> }[] = [];
+  const configured = options.searxngUrl?.trim();
+  if (configured)
+    providers.push({
+      name: "your SearXNG instance",
+      run: () => searchWithSearxng(cleanQuery, configured, signal),
     });
-    if (!response.ok) throw new WebToolError(`The search provider returned HTTP ${response.status}.`);
-    const length = Number(response.headers.get("content-length") ?? 0);
-    if (length > 4 * 1024 * 1024) throw new WebToolError("The search results page was unexpectedly large.");
-    html = await response.text();
-  } catch (error) {
-    if (signal.aborted) throw error;
-    if (error instanceof WebToolError) throw error;
-    throw new WebToolError("Web search could not reach DuckDuckGo. Try again or check the device network.");
+  providers.push(
+    { name: "DuckDuckGo", run: () => searchWithDuckDuckGoHtml(cleanQuery, signal) },
+    { name: "DuckDuckGo Lite", run: () => searchWithDuckDuckGoLite(cleanQuery, signal) },
+    { name: "Wikipedia", run: () => searchWithWikipedia(cleanQuery, signal) },
+  );
+
+  const diagnostics: WebSearchDiagnostics[] = [];
+  for (const provider of providers) {
+    try {
+      const sources = (await provider.run()).slice(0, 6);
+      if (sources.length) return sources;
+      diagnostics.push({ provider: provider.name, outcome: "returned no results" });
+    } catch (error) {
+      if (signal.aborted) throw error;
+      diagnostics.push({
+        provider: provider.name,
+        outcome: error instanceof Error ? error.message : "failed",
+      });
+    }
   }
-  if (html.length > 4 * 1024 * 1024) throw new WebToolError("The search results page was unexpectedly large.");
-  const sources = parseSearchResults(html).slice(0, 6);
-  if (!sources.length) {
-    throw new WebToolError("DuckDuckGo did not return readable search results. No source or answer was invented.");
-  }
-  return sources;
+  throw new WebSearchError(
+    "No search provider returned usable results, so nothing was invented.",
+    diagnostics,
+  );
 }
 
 /** Search, then follow a bounded number of public results so answers use page text rather than snippets alone. */
 export async function researchWeb(
   query: string,
   signal: AbortSignal,
+  options: WebSearchOptions = {},
 ): Promise<WebResearchResult> {
-  const searchResults = await searchWeb(query, signal);
+  const searchResults = await searchWeb(query, signal, options);
   const followed = await Promise.all(
     searchResults.slice(0, 3).map(async (source) => {
       try {
@@ -149,6 +354,51 @@ function parseSearchResults(html: string): WebSource[] {
     const snippet = snippetMatch ? decodeEntities(stripTags(snippetMatch[1])).replace(/\s+/g, " ").trim() : "";
     return [{ title: title.slice(0, 180), url: target, snippet: snippet.slice(0, 900) }];
   });
+}
+
+/**
+ * Parse DuckDuckGo's low-bandwidth results. Each hit is a `result-link` anchor
+ * inside a table row, with the abstract in a following `result-snippet` cell.
+ */
+export function parseLiteSearchResults(html: string): WebSource[] {
+  const matches = [
+    ...html.matchAll(
+      /<a\b(?=[^>]*\bclass\s*=\s*['"][^'"]*result-link[^'"]*['"])[^>]*>([\s\S]*?)<\/a>/gi,
+    ),
+  ];
+  return matches.flatMap((match, index) => {
+    const opening = match[0].slice(0, match[0].indexOf(">") + 1);
+    const href = opening.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+    const title = decodeEntities(stripTags(match[1])).replace(/\s+/g, " ").trim();
+    if (!href || !title) return [];
+    const target = resolveDuckDuckGoHref(href);
+    if (!target) return [];
+    const start = match.index ?? 0;
+    const region = html.slice(start, matches[index + 1]?.index ?? start + 2000);
+    const snippetMatch = region.match(
+      /class\s*=\s*['"][^'"]*result-snippet[^'"]*['"][^>]*>([\s\S]*?)<\/td>/i,
+    );
+    const snippet = snippetMatch
+      ? decodeEntities(stripTags(snippetMatch[1])).replace(/\s+/g, " ").trim()
+      : "";
+    return [{ title: title.slice(0, 180), url: target, snippet: snippet.slice(0, 900) }];
+  });
+}
+
+/**
+ * DuckDuckGo wraps outbound links as //duckduckgo.com/l/?uddg=<encoded target>.
+ * Unwrap that and reject anything that is not a public HTTPS address, so a
+ * malformed or internal URL can never become a "source".
+ */
+function resolveDuckDuckGoHref(href: string): string | null {
+  try {
+    const absolute = href.startsWith("//") ? `https:${href}` : href;
+    const parsed = new URL(absolute);
+    const target = parsed.searchParams.get("uddg") ?? absolute;
+    return validatePublicHttpsUrl(decodeURIComponent(target));
+  } catch {
+    return null;
+  }
 }
 
 export function isPublicHttpsUrl(value: string): boolean {

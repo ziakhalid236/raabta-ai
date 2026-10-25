@@ -13,6 +13,7 @@ export type AiToolDefinition = {
 };
 
 const string = (description: string) => ({ type: "string", description });
+const boolean = (description: string) => ({ type: "boolean", description });
 
 const BASE_TOOLS: AiToolDefinition[] = [
   {
@@ -243,6 +244,24 @@ const GITHUB_TOOLS: AiToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "github_create_repository",
+      description:
+        "Create a new GitHub repository for the connected account. It is created with an initial README commit (auto_init) so files can be written to it immediately. The app asks the user to approve before creating it.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: string("Repository name, letters/digits/-/_/."),
+          description: string("Optional short description"),
+          isPrivate: boolean("Create as private; defaults to true"),
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "github_create_issue",
       description:
         "Prepare an issue in a connected GitHub repository. The app asks the user to approve the exact issue before creating it.",
@@ -345,6 +364,23 @@ const GITHUB_TOOLS: AiToolDefinition[] = [
           runId: { type: "number", description: "GitHub Actions run ID" },
         },
         required: ["repository", "runId"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_list_commits",
+      description:
+        "List recent commits on a branch. Use this after a write to confirm the commit actually landed on GitHub.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          branch: string("Optional branch name; defaults to the repository default branch"),
+        },
+        required: ["repository"],
         additionalProperties: false,
       },
     },

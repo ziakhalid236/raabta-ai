@@ -93,6 +93,7 @@ import {
 import {
   classifyCodingModels,
   classifyVisionModels,
+  visionCandidateModels,
   discoverProviderModels,
   type ProviderCatalog,
   type ProviderModel,
@@ -100,10 +101,13 @@ import {
 import { fetchGitHubProfile, type GitHubProfile } from "@/lib/github-account";
 import {
   createGitHubBranch,
+  createGitHubRepository,
+  listGitHubCommits,
   createGitHubIssue,
   createGitHubPullRequest,
   dispatchGitHubWorkflow,
   getGitHubWorkflowRun,
+  inspectGitHubToken,
   listGitHubRepositories,
   listGitHubRepositoryFiles,
   listGitHubWorkflowRuns,
@@ -111,6 +115,7 @@ import {
   updateGitHubFile,
   type GitHubRepository,
 } from "@/lib/github-tools";
+import { openBrowserAsync, WebBrowserPresentationStyle } from "expo-web-browser";
 import { AttachmentSheet } from "@/components/raabta/attachment-sheet";
 import { AccountsSheet } from "@/components/raabta/accounts-sheet";
 import { AgentPlanCard } from "@/components/raabta/agent-plan-card";
@@ -129,6 +134,7 @@ import {
   isPublicHttpsUrl,
   researchWeb,
   searchWeb,
+  WebSearchError,
   type WebSource,
   WebToolError,
 } from "@/lib/web-tools";
@@ -212,6 +218,7 @@ export default function HomeScreen() {
 
   const [keyDraft, setKeyDraft] = useState("");
   const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState("");
+  const [searxngUrlDraft, setSearxngUrlDraft] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasKey, setHasKey] = useState(false);
@@ -625,7 +632,9 @@ export default function HomeScreen() {
       ): Promise<string> => {
         if (name === "web_search")
           return JSON.stringify(
-            await searchWeb(String(args.query ?? text), controller.signal),
+            await searchWeb(String(args.query ?? text), controller.signal, {
+              searxngUrl: preferences.searxngUrl,
+            }),
           );
         if (name === "read_public_web_page")
           return JSON.stringify(
@@ -750,6 +759,35 @@ export default function HomeScreen() {
               base: String(args.base),
               signal: controller.signal,
             }),
+          );
+        if (name === "github_create_repository") {
+          const created = await createGitHubRepository({
+            token: githubToken,
+            name: String(args.name),
+            description: typeof args.description === "string" ? args.description : undefined,
+            isPrivate: args.isPrivate !== false,
+            signal: controller.signal,
+          });
+          const repositories = await listGitHubRepositories(githubToken, controller.signal);
+          setGithubRepositories(repositories);
+          const nextPreferences = {
+            ...preferences,
+            githubRepositories: JSON.stringify(repositories),
+          };
+          setPreferences(nextPreferences);
+          void savePreferences(nextPreferences).catch(() => {
+            setSettingsNotice("The refreshed GitHub repository list could not be saved locally.");
+          });
+          return JSON.stringify(created);
+        }
+        if (name === "github_list_commits")
+          return JSON.stringify(
+            await listGitHubCommits(
+              githubToken,
+              String(args.repository),
+              typeof args.branch === "string" ? args.branch : undefined,
+              controller.signal,
+            ),
           );
         if (name === "github_create_branch")
           return JSON.stringify(
@@ -946,7 +984,9 @@ export default function HomeScreen() {
           { activityKind: "research", activityPlatform: "Web research" },
         );
       } else if (shouldAutoResearch(text)) {
-        const research = await researchWeb(text, controller.signal);
+        const research = await researchWeb(text, controller.signal, {
+          searxngUrl: preferences.searxngUrl,
+        });
         const retrieved = research.sources;
         updateThread(currentThread.id, (thread) => ({
           ...thread,
@@ -1175,7 +1215,9 @@ export default function HomeScreen() {
         "DuckDuckGo پر عوامی ذرائع تلاش ہو رہے ہیں…",
       ),
       resolve: async (signal) => {
-        const results = await researchWeb(query, signal);
+        const results = await researchWeb(query, signal, {
+          searxngUrl: preferences.searxngUrl,
+        });
         return results.sources.map((source) => sourceToAttachment(source));
       },
     });
@@ -1515,9 +1557,17 @@ export default function HomeScreen() {
         visionModelName: selectedVision?.name ?? "",
         codingModelId: selectedCoding?.id ?? "",
         codingModelName: selectedCoding?.name ?? "",
+        // Most OpenAI-compatible /models entries omit modality metadata, so a
+        // chat model that only *lists* no image input is not proof it cannot
+        // read images. Accept the name heuristic too, otherwise a working
+        // vision model is blocked from ever receiving a photo.
         modelSupportsImages:
           catalog.providerKind === "cloudflare-worker" ||
-          Boolean(selectedChat?.inputModalities.includes("image")),
+          Boolean(selectedChat?.inputModalities.includes("image")) ||
+          Boolean(
+            selectedChat &&
+              classifyVisionModels([selectedChat]).length > 0,
+          ),
         transcriptionModelId:
           selectedVoice?.id ??
           (catalog.transcriptionWarning
@@ -1551,7 +1601,9 @@ export default function HomeScreen() {
       ...preferences,
       modelId: model.id,
       modelName: model.name,
-      modelSupportsImages: model.inputModalities.includes("image"),
+      modelSupportsImages:
+        model.inputModalities.includes("image") ||
+        classifyVisionModels([model]).length > 0,
     };
     setPreferences(nextPreferences);
     setModelPickerKind(null);
@@ -1601,6 +1653,9 @@ export default function HomeScreen() {
     try {
       const profile = await fetchGitHubProfile(token);
       const repositories = await listGitHubRepositories(token);
+      // Tell the user up front if this token cannot write, instead of letting
+      // the first repository task fail with a confusing 403 or 422 later.
+      const permission = await inspectGitHubToken(token).catch(() => null);
       await writeGitHubToken(token);
       const nextPreferences = {
         ...preferences,
@@ -1620,7 +1675,7 @@ export default function HomeScreen() {
       setGithubProfile(profile);
       setGithubRepositories(repositories);
       setAccountsNotice(
-        `Connected as @${profile.login}. ${repositories.length} repositories are visible to this token. Repository actions depend on the token permissions and ask before creating or changing GitHub content.`,
+        `Connected as @${profile.login}. ${repositories.length} repositories are visible to this token. ${permission?.summary ?? ""} Repository actions ask before creating or changing GitHub content.`,
       );
       return true;
     } catch (error) {
@@ -2545,6 +2600,43 @@ export default function HomeScreen() {
             placeholderTextColor="#9AA29E"
             style={[styles.fieldInput, styles.autoDirection]}
           />
+          <FieldLabel
+            title={t("Web search · open source (optional)", "ویب سرچ · اوپن سورس (اختیاری)")}
+            subtitle={t(
+              "DuckDuckGo now blocks app requests with a bot challenge. Add your own SearXNG instance URL to search reliably. Leave empty to try the built-in providers in order.",
+              "DuckDuckGo اب ایپ کی درخواستوں کو bot challenge سے روک دیتا ہے۔ قابلِ اعتماد تلاش کے لیے اپنی SearXNG instance کا URL دیں۔ خالی چھوڑنے پر built-in providers ترتیب سے آزمائے جائیں گے۔",
+            )}
+          />
+          <View style={styles.keyInputWrap}>
+            <TextInput
+              accessibilityLabel="SearXNG instance URL"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={searxngUrlDraft}
+              onChangeText={setSearxngUrlDraft}
+              placeholder="https://searx.example.org"
+              placeholderTextColor="#9AA29E"
+              style={[styles.fieldInput, styles.autoDirection, { flex: 1 }]}
+            />
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              const next = {
+                ...preferences,
+                searxngUrl: searxngUrlDraft.trim().replace(/\/+$/, ""),
+              };
+              setPreferences(next);
+              void savePreferences(next).catch(() => {
+                setSettingsNotice("The SearXNG URL could not be saved locally.");
+              });
+            }}
+            style={styles.primaryButton}
+          >
+            <Text style={styles.primaryButtonText}>
+              {t("Save search instance", "سرچ instance محفوظ کریں")}
+            </Text>
+          </Pressable>
           <Notice
             text={t(
               "AI workspace files stay in Raabta's private app storage (100 MB total; 10 MB per file). The agent cannot access your other phone files or run arbitrary terminal commands.",
@@ -2946,7 +3038,7 @@ export default function HomeScreen() {
           modelPickerKind === "transcription"
             ? (modelCatalog?.transcriptionModels ?? [])
             : modelPickerKind === "vision"
-              ? (modelCatalog?.visionModels ?? [])
+              ? visionCandidateModels(modelCatalog?.chatModels ?? [])
               : (modelCatalog?.chatModels ?? [])
         }
         selectedModelId={
@@ -3745,6 +3837,12 @@ function describeApproval(
         urdu: `${repo} میں pull request کھلے گی: ${String(args.head ?? "")} → ${String(args.base ?? "main")}۔`,
         preview: `${String(args.title ?? "")}\n\n${body.slice(0, 1200)}`,
       };
+    case "github_create_repository":
+      return {
+        english: `Create a new ${args.isPrivate === false ? "public" : "private"} GitHub repository named ${String(args.name ?? "")}.`,
+        urdu: `${String(args.name ?? "")} نام سے نیا ${args.isPrivate === false ? "public" : "private"} GitHub repository بنے گا۔`,
+        preview: String(args.description ?? "").slice(0, 400),
+      };
     case "github_create_branch":
       return {
         english: `Create branch ${String(args.branch ?? "")} from ${String(args.fromBranch ?? "main")} in ${repo}.`,
@@ -3802,6 +3900,12 @@ function sourceToAttachment(source: WebSource): ChatAttachment {
 }
 
 function safeTaskError(error: unknown): string {
+  // A search failure must name what each provider did, otherwise the user
+  // cannot tell a blocked search from an empty one or fix it.
+  if (error instanceof WebSearchError)
+    return `${error.message} ${error.diagnostics
+      .map((entry) => `${entry.provider}: ${entry.outcome}`)
+      .join("; ")}`.slice(0, 400);
   if (error instanceof AIRequestError || error instanceof WebToolError)
     return error.message;
   if (error instanceof Error) {
@@ -3823,6 +3927,15 @@ async function openSafeExternalUrl(value: string): Promise<void> {
     return;
   }
   try {
+    // Read sources inside Raabta first, so research does not throw the user out
+    // of the app. Falling back to the system browser keeps web/desktop working.
+    if (Platform.OS !== "web") {
+      await openBrowserAsync(value, {
+        presentationStyle: WebBrowserPresentationStyle.AUTOMATIC,
+        enableBarCollapsing: true,
+      });
+      return;
+    }
     const canOpen = await Linking.canOpenURL(value);
     if (!canOpen) throw new Error("unsupported");
     await Linking.openURL(value);

@@ -17,6 +17,13 @@ export type GitHubRepositoryFile = {
   downloadUrl: string;
 };
 export type GitHubWriteResult = { url: string; message: string; sha?: string };
+export type GitHubCommit = {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+};
 export type GitHubWorkflowRun = {
   id: number;
   name: string;
@@ -146,12 +153,18 @@ export async function updateGitHubFile(args: {
       signal: args.signal,
     },
   );
+  // The body can only be read once, so reuse the parsed payload for the error
+  // detail instead of calling gitHubErrorDetail (which would re-read it and
+  // silently lose GitHub's explanation).
   const payload: any = await response.json().catch(() => null);
-  if (!response.ok)
+  if (!response.ok) {
+    const detail = describeGitHubPayload(payload);
+    const hint = gitHubStatusHint(response.status, "PUT", `/contents/${args.path}`);
     throw new GitHubToolError(
-      `GitHub could not update the file (HTTP ${response.status}).`,
+      `GitHub could not update the file (HTTP ${response.status}). ${detail || hint}`.trim(),
       response.status,
     );
+  }
   return {
     url:
       typeof payload?.content?.html_url === "string"
@@ -236,6 +249,129 @@ async function commitLargeGitHubFile(args: {
     message: "Large file committed through GitHub's Git Data API.",
     sha: blobSha,
   };
+}
+
+/**
+ * Create a repository for the connected user. `autoInit: true` is required
+ * before the Git Data API can write to it, because an empty repository has no
+ * branch and no commit for a file write to attach to. Writing a file into a
+ * repository with no commits is the most common source of GitHub HTTP 422.
+ */
+export async function createGitHubRepository(args: {
+  token: string;
+  name: string;
+  description?: string;
+  isPrivate?: boolean;
+  signal?: AbortSignal;
+}): Promise<GitHubRepository> {
+  const response = await githubWrite(
+    "/user/repos",
+    args.token,
+    {
+      name: args.name,
+      description: args.description ?? "",
+      private: args.isPrivate ?? true,
+      auto_init: true,
+    },
+    args.signal,
+  );
+  const payload: unknown = await response.json().catch(() => null);
+  const [repository] = normalizeRepository(payload);
+  if (!repository)
+    throw new GitHubToolError("GitHub created the repository but returned no details for it.");
+  return repository;
+}
+
+/**
+ * A token can authenticate and still be unable to write: fine-grained tokens
+ * need "Contents: Read and write" per repository, and classic tokens need the
+ * `repo` scope. GitHub reports the granted scopes in a header on every
+ * response, so this reads them instead of failing later on a confusing 403.
+ */
+export type GitHubTokenPermission = {
+  /** Scopes GitHub reports, for example ["repo", "workflow"]. */
+  scopes: string[];
+  /** Fine-grained tokens report no scopes; permission is per repository. */
+  isFineGrained: boolean;
+  canWriteCode: boolean;
+  canManageWorkflows: boolean;
+  canCreateRepositories: boolean;
+  summary: string;
+};
+
+export async function inspectGitHubToken(
+  token: string,
+  signal?: AbortSignal,
+): Promise<GitHubTokenPermission> {
+  const response = await githubFetch("/user", token, signal);
+  const raw = response.headers.get("x-oauth-scopes") ?? "";
+  const scopes = raw
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+  // Fine-grained tokens send neither x-oauth-scopes nor x-accepted-oauth-scopes.
+  const isFineGrained =
+    scopes.length === 0 && response.headers.get("x-accepted-oauth-scopes") !== null;
+
+  const canWriteCode = isFineGrained || scopes.includes("repo") || scopes.includes("public_repo");
+  const canManageWorkflows = isFineGrained || scopes.includes("workflow");
+  const canCreateRepositories =
+    isFineGrained || scopes.includes("repo") || scopes.includes("public_repo");
+
+  const missing: string[] = [];
+  if (!canWriteCode) missing.push("repo (write code and files)");
+  if (!canManageWorkflows) missing.push("workflow (run and read Actions)");
+  if (!canCreateRepositories) missing.push("repo (create repositories)");
+
+  return {
+    scopes,
+    isFineGrained,
+    canWriteCode,
+    canManageWorkflows,
+    canCreateRepositories,
+    summary: isFineGrained
+      ? "This is a fine-grained token. Permission is set per repository, so grant Contents: Read and write plus Actions: Read and write on each repository you want Raabta to change."
+      : missing.length
+        ? `This token is read-only for some actions. It is missing: ${missing.join(", ")}. Recreate the token with those scopes.`
+        : "This token can read, write code, run workflows and create repositories.",
+  };
+}
+
+/** Recent commits on a branch, so the agent can confirm a write actually landed. */
+export async function listGitHubCommits(
+  token: string,
+  repository: string,
+  branch?: string,
+  signal?: AbortSignal,
+): Promise<GitHubCommit[]> {
+  const suffix = branch ? `?sha=${encodeURIComponent(branch)}&per_page=15` : "?per_page=15";
+  const response = await githubFetch(
+    `/repos/${encodeRepository(repository)}/commits${suffix}`,
+    token,
+    signal,
+  );
+  const payload: unknown = await response.json().catch(() => null);
+  if (!Array.isArray(payload))
+    throw new GitHubToolError("GitHub returned an unreadable commit list.");
+  return payload.flatMap((entry: any) => {
+    if (typeof entry?.sha !== "string") return [];
+    return [{
+      sha: entry.sha,
+      message:
+        typeof entry?.commit?.message === "string"
+          ? entry.commit.message.split("\n")[0].slice(0, 200)
+          : "",
+      author:
+        typeof entry?.commit?.author?.name === "string"
+          ? entry.commit.author.name
+          : typeof entry?.author?.login === "string"
+            ? entry.author.login
+            : "",
+      date:
+        typeof entry?.commit?.author?.date === "string" ? entry.commit.author.date : "",
+      url: typeof entry?.html_url === "string" ? entry.html_url : "",
+    } satisfies GitHubCommit];
+  });
 }
 
 export async function createGitHubIssue(args: {
@@ -383,6 +519,62 @@ export async function getGitHubWorkflowRun(
     createdAt: typeof run.created_at === "string" ? run.created_at : "",
   };
 }
+/**
+ * GitHub explains every 4xx/5xx in the JSON body (message + errors[]). That
+ * explanation is the only way to tell a real cause apart: a 422 for an empty
+ * commit, a 409 for a stale sha, a 403 for a missing token scope all look the
+ * same if the body is discarded. Never include the request headers here, so a
+ * token can never leak into an error message or the task journal.
+ */
+async function gitHubErrorDetail(response: Response): Promise<string> {
+  const payload: any = await response.json().catch(() => null);
+  return describeGitHubPayload(payload);
+}
+
+/** Flatten GitHub's { message, errors[] } into one actionable sentence. */
+function describeGitHubPayload(payload: any): string {
+  const parts: string[] = [];
+  if (typeof payload?.message === "string") parts.push(payload.message);
+  if (Array.isArray(payload?.errors)) {
+    for (const item of payload.errors) {
+      if (typeof item === "string") parts.push(item);
+      else if (item && typeof item === "object") {
+        const field = typeof item.field === "string" ? item.field : "";
+        const code = typeof item.code === "string" ? item.code : "";
+        const message = typeof item.message === "string" ? item.message : "";
+        parts.push([field, code, message].filter(Boolean).join(": "));
+      }
+    }
+  }
+  if (typeof payload?.documentation_url === "string")
+    parts.push(`See ${payload.documentation_url}`);
+  return parts.filter(Boolean).join(" ").slice(0, 400);
+}
+
+/**
+ * Turn an HTTP status into something a user can act on. The status alone is
+ * useless ("HTTP 422"); the detail is what makes the next attempt succeed.
+ */
+function gitHubStatusHint(status: number, method: string, path: string): string {
+  if (status === 422)
+    return path.includes("/contents/")
+      ? "GitHub rejected the file write. Usually the branch does not exist yet, the file's current sha is stale, or the branch is protected. Create the branch first, then re-read the file before updating it."
+      : "GitHub rejected the request body. A required field is missing or has the wrong type.";
+  if (status === 409)
+    return "The branch moved while this task was running. Re-read the file and retry.";
+  if (status === 403)
+    return "The token lacks permission for this action, or the rate limit was hit. Check the token's scopes.";
+  if (status === 404)
+    return "The repository, branch, or path was not found, or the token cannot see it (private repo without repo scope).";
+  if (status === 401)
+    return "The token is missing or expired. Reconnect GitHub.";
+  if (status === 451)
+    return "GitHub blocked this request for legal reasons.";
+  if (status >= 500)
+    return "GitHub had a server-side problem. This is safe to retry.";
+  return `The ${method} request to ${path.split("?")[0]} was refused.`;
+}
+
 async function githubFetch(
   path: string,
   token: string,
@@ -406,13 +598,12 @@ async function githubFetch(
     );
   }
   if (!response.ok) {
-    const message =
-      response.status === 403
-        ? "GitHub denied this request. Check token permissions or rate limit."
-        : response.status === 404
-          ? "GitHub could not find that repository or file, or the token cannot access it."
-          : `GitHub returned HTTP ${response.status}.`;
-    throw new GitHubToolError(message, response.status);
+    const detail = await gitHubErrorDetail(response);
+    const hint = gitHubStatusHint(response.status, "GET", path);
+    throw new GitHubToolError(
+      `GitHub could not complete that request (HTTP ${response.status}). ${detail || hint}`.trim(),
+      response.status,
+    );
   }
   return response;
 }
@@ -441,11 +632,14 @@ async function githubWrite(
       "Could not reach GitHub. Check the device network.",
     );
   }
-  if (!response.ok)
+  if (!response.ok) {
+    const detail = await gitHubErrorDetail(response);
+    const hint = gitHubStatusHint(response.status, "POST", path);
     throw new GitHubToolError(
-      `GitHub write request failed (HTTP ${response.status}).`,
+      `GitHub write request failed (HTTP ${response.status}). ${detail || hint}`.trim(),
       response.status,
     );
+  }
   return response;
 }
 
@@ -472,11 +666,14 @@ async function githubPatch(
     if (signal?.aborted) throw error;
     throw new GitHubToolError("Could not reach GitHub. Check the device network.");
   }
-  if (!response.ok)
+  if (!response.ok) {
+    const detail = await gitHubErrorDetail(response);
+    const hint = gitHubStatusHint(response.status, "PATCH", path);
     throw new GitHubToolError(
-      `GitHub branch update failed (HTTP ${response.status}).`,
+      `GitHub branch update failed (HTTP ${response.status}). ${detail || hint}`.trim(),
       response.status,
     );
+  }
   return response;
 }
 function encodeRepository(value: string): string {

@@ -249,15 +249,43 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+/**
+ * Model IDs that reliably accept image input. Most OpenAI-compatible /models
+ * endpoints return only { id, object }, so there is nothing to read except the
+ * name. This list is therefore the primary signal and must cover the families
+ * users actually load, not just the ones that existed when it was written.
+ */
+const VISION_MODEL_PATTERN =
+  /vision|multimodal|\bvl\b|-vl-|image|llava|pixtral|internvl|moondream|minicpm-v|gemma-?3|gemma-?4|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|o3|o4-mini|claude-[34]|claude-.*(?:sonnet|opus|haiku)|gemini|grok-.*vision|glm-4v|qwen.*-vl|llama.*vision|phi-.*vision|smolvlm|idefics|florence|kosmos|fuyu|paligemma|molmo|aria|hunyuan.*vision|yi.*vision|step-1v|deepseek.*vl|internlm.*xcomposer|minicpm|janus/i;
+
 export function classifyVisionModels(models: ProviderModel[]): ProviderModel[] {
   return models.filter(
     (model) =>
       model.inputModalities.some((modality) =>
         /image|vision|multimodal/i.test(modality),
-      ) || /vision|multimodal|\bvl\b|image|llava|pixtral|internvl|moondream|minicpm-v|gemma-3|gpt-4o|claude-3|glm-4v|qwen.*-vl|llama.*vision/i.test(
+      ) || VISION_MODEL_PATTERN.test(
         `${model.id} ${model.name} ${model.description}`,
       ),
   );
+}
+
+/**
+ * Every model offered for image questions, best guess first. Detection from a
+ * bare model ID is a guess, so the user must still be able to pick a model the
+ * heuristic did not recognise; hiding those is what made an image-capable
+ * model appear to be missing.
+ */
+export function visionCandidateModels(models: ProviderModel[]): ProviderModel[] {
+  const capable: ProviderModel[] = [];
+  const rest: ProviderModel[] = [];
+  for (const model of models) {
+    const looksCapable =
+      model.inputModalities.some((modality) =>
+        /image|vision|multimodal/i.test(modality),
+      ) || VISION_MODEL_PATTERN.test(`${model.id} ${model.name} ${model.description}`);
+    (looksCapable ? capable : rest).push(model);
+  }
+  return [...capable, ...rest];
 }
 
 export function classifyCodingModels(models: ProviderModel[]): ProviderModel[] {

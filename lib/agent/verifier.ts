@@ -96,6 +96,12 @@ const WRITE_CLAIMS: Array<{ pattern: RegExp; tool: string; english: string; urdu
     english: "The answer mentions a branch, but none was created.",
     urdu: "جواب میں branch کا ذکر ہے، مگر کوئی نہیں بنی۔",
   },
+  {
+    pattern: /\b(?:created?|made|new)\b[\s\S]{0,24}\brepositor(?:y|ies)\b/i,
+    tool: "github_create_repository",
+    english: "The answer mentions a new repository, but none was created.",
+    urdu: "جواب میں نیا repository کا ذکر ہے، مگر کوئی نہیں بنایا گیا۔",
+  },
 ];
 
 /** Phrases that assert a page/site was read. */
