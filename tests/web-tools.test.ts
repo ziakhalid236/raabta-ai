@@ -12,6 +12,21 @@ describe("web safety and research", () => {
     expect(isPublicHttpsUrl("https://192.168.1.10/private")).toBe(false);
   });
 
+  it("does not block ordinary domains that merely start with fc or fd", () => {
+    // Regression: bare "fc"/"fd" prefixes used to be treated as IPv6 ranges and
+    // wrongly blocked real public hosts such as fcm.example.com or fdic.gov.
+    expect(isPublicHttpsUrl("https://fcm.example.com/notice")).toBe(true);
+    expect(isPublicHttpsUrl("https://fdic.gov/news")).toBe(true);
+    expect(isPublicHttpsUrl("https://fcbank.com/rates")).toBe(true);
+  });
+
+  it("still blocks private IPv6 and loopback literals", () => {
+    expect(isPublicHttpsUrl("https://[::1]/private")).toBe(false);
+    expect(isPublicHttpsUrl("https://[fc00::1]/private")).toBe(false);
+    expect(isPublicHttpsUrl("https://[fd12:3456::1]/private")).toBe(false);
+    expect(isPublicHttpsUrl("https://localhost/private")).toBe(false);
+  });
+
   it("follows the first public results and preserves blocked links as snippets", async () => {
     const searchHtml = `
       <a class="result__a" href="https://example.com/one">First source</a>

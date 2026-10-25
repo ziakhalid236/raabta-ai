@@ -54,11 +54,11 @@ export async function listAIWorkspaceFiles(directory = ""): Promise<string[]> {
 export async function findAIWorkspaceText(
   query: string,
   directory = "",
-): Promise<{ matches: Array<{ path: string; line: number; text: string }>; truncated: boolean }> {
+): Promise<{ matches: { path: string; line: number; text: string }[]; truncated: boolean }> {
   const needle = query.trim().toLowerCase();
   if (!needle) throw new AIWorkspaceError("Enter text to search for in the AI workspace.");
   const files = await listAIWorkspaceFiles(directory);
-  const matches: Array<{ path: string; line: number; text: string }> = [];
+  const matches: { path: string; line: number; text: string }[] = [];
   let truncated = false;
   for (const entry of files) {
     if (entry.endsWith("/")) {
@@ -87,6 +87,64 @@ export async function readAIWorkspaceFile(relativePath: string): Promise<string>
     return `${content.slice(0, MAX_READ_CHARS)}\n\n[Read limit reached; file is kept unchanged.]`;
   }
   return content;
+}
+
+export async function createAIWorkspaceDirectory(
+  relativePath: string,
+): Promise<{ path: string; usageBytes: number }> {
+  const safePath = safeRelativePath(relativePath);
+  const path = pathInWorkspace(safePath);
+  const existing = await FileSystem.getInfoAsync(path);
+  if (existing.exists && !existing.isDirectory)
+    throw new AIWorkspaceError("A file already exists at that path.");
+  await FileSystem.makeDirectoryAsync(path, { intermediates: true });
+  const usage = await getAIWorkspaceUsage();
+  return { path: safePath, usageBytes: usage.usedBytes };
+}
+
+export async function moveAIWorkspaceFile(
+  fromPath: string,
+  toPath: string,
+): Promise<{ from: string; to: string; usageBytes: number }> {
+  const safeFrom = safeRelativePath(fromPath);
+  const safeTo = safeRelativePath(toPath);
+  const source = pathInWorkspace(safeFrom);
+  const target = pathInWorkspace(safeTo);
+  const info = await FileSystem.getInfoAsync(source);
+  if (!info.exists) throw new AIWorkspaceError("The file to move was not found in the workspace.");
+  if (info.isDirectory)
+    throw new AIWorkspaceError("Moving folders is not supported; move individual files.");
+  const targetInfo = await FileSystem.getInfoAsync(target);
+  if (targetInfo.exists) throw new AIWorkspaceError("A file already exists at the destination path.");
+  const parent = target.slice(0, target.lastIndexOf("/"));
+  await FileSystem.makeDirectoryAsync(parent, { intermediates: true });
+  await FileSystem.moveAsync({ from: source, to: target });
+  const usage = await getAIWorkspaceUsage();
+  return { from: safeFrom, to: safeTo, usageBytes: usage.usedBytes };
+}
+
+export async function getAIWorkspaceFileInfo(
+  relativePath: string,
+): Promise<{ path: string; exists: boolean; isDirectory: boolean; bytes: number; lines: number | null }> {
+  const safePath = safeRelativePath(relativePath, true);
+  const path = pathInWorkspace(safePath, true);
+  const info = await FileSystem.getInfoAsync(path);
+  if (!info.exists)
+    return { path: safePath, exists: false, isDirectory: false, bytes: 0, lines: null };
+  if (info.isDirectory)
+    return { path: safePath, exists: true, isDirectory: true, bytes: 0, lines: null };
+  let lines: number | null = null;
+  if ((info.size ?? 0) <= MAX_FILE_BYTES) {
+    const content = await FileSystem.readAsStringAsync(path);
+    lines = content.length ? content.split(/\r?\n/).length : 0;
+  }
+  return {
+    path: safePath,
+    exists: true,
+    isDirectory: false,
+    bytes: info.size ?? 0,
+    lines,
+  };
 }
 
 export async function deleteAIWorkspaceFile(relativePath: string): Promise<{ path: string; usageBytes: number }> {

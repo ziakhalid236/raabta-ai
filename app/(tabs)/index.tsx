@@ -40,13 +40,36 @@ import {
 import { getLiveToolDefinitions } from "@/lib/ai-tools";
 import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
 import {
+  createAIWorkspaceDirectory,
   deleteAIWorkspaceFile,
   findAIWorkspaceText,
+  getAIWorkspaceFileInfo,
   getAIWorkspaceUsage,
   listAIWorkspaceFiles,
+  moveAIWorkspaceFile,
   readAIWorkspaceFile,
   writeAIWorkspaceFile,
 } from "@/lib/ai-workspace";
+import { buildAgentPlan } from "@/lib/agent/planner";
+import { AgentTaskController, type AgentTask } from "@/lib/agent/task";
+import {
+  applyDecision,
+  checkApproval,
+  EMPTY_APPROVAL_POLICY,
+  type ApprovalDecision,
+  type ApprovalPolicy,
+} from "@/lib/agent/approvals";
+import { detectCapabilities, type CapabilityReport } from "@/lib/agent/capabilities";
+import {
+  appendJournalEntry,
+  journalContext,
+  loadJournal,
+  toJournalEntry,
+  type JournalEntry,
+} from "@/lib/agent/journal";
+import { buildRepairPrompt, verifyTask, type VerificationReport } from "@/lib/agent/verifier";
+import { ApprovalSheet, type ApprovalRequest } from "@/components/raabta/approval-sheet";
+import { AgentReviewCard } from "@/components/raabta/agent-review-card";
 import {
   createThread,
   DEFAULT_PREFERENCES,
@@ -90,6 +113,8 @@ import {
 } from "@/lib/github-tools";
 import { AttachmentSheet } from "@/components/raabta/attachment-sheet";
 import { AccountsSheet } from "@/components/raabta/accounts-sheet";
+import { AgentPlanCard } from "@/components/raabta/agent-plan-card";
+import { StarterPromptGrid } from "@/components/raabta/starter-prompts";
 import { ModelPicker } from "@/components/raabta/model-picker";
 import {
   disposeAudioFile,
@@ -181,6 +206,7 @@ export default function HomeScreen() {
     useState<ChatPreferences>(DEFAULT_PREFERENCES);
   const isUrdu = preferences.language === "ur";
   const t = (english: string, urdu: string) => (isUrdu ? urdu : english);
+
   const [keyDraft, setKeyDraft] = useState("");
   const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
@@ -222,8 +248,51 @@ export default function HomeScreen() {
   const [pageUrlDraft, setPageUrlDraft] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [agentTask, setAgentTask] = useState<AgentTask | null>(null);
+  const [planExpanded, setPlanExpanded] = useState(false);
+  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>(EMPTY_APPROVAL_POLICY);
+  const [verification, setVerification] = useState<VerificationReport | null>(null);
+  const [capabilities, setCapabilities] = useState<CapabilityReport | null>(null);
+  const [journal, setJournal] = useState<JournalEntry[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const approvalPolicyRef = useRef<ApprovalPolicy>(EMPTY_APPROVAL_POLICY);
+  const preferencesRef = useRef<ChatPreferences>(DEFAULT_PREFERENCES);
+  const journalRef = useRef<JournalEntry[]>([]);
+  const approvalResolverRef = useRef<((decision: ApprovalDecision) => void) | null>(null);
+
+  useEffect(() => {
+    approvalPolicyRef.current = approvalPolicy;
+  }, [approvalPolicy]);
+
+  useEffect(() => {
+    preferencesRef.current = preferences;
+  }, [preferences]);
+
+  useEffect(() => {
+    journalRef.current = journal;
+  }, [journal]);
+
+  const requestAgentApproval = useCallback(
+    (request: ApprovalRequest): Promise<boolean> =>
+      new Promise((resolve) => {
+        setApprovalRequest(request);
+        approvalResolverRef.current = (decision) => {
+          approvalResolverRef.current = null;
+          setApprovalRequest(null);
+          setApprovalPolicy((current) => {
+            const next = applyDecision(current, request.tool, decision);
+            void savePreferences({ ...preferencesRef.current, approvalPolicy: next }).catch(
+              () => undefined,
+            );
+            return next;
+          });
+          resolve(decision !== "deny");
+        };
+      }),
+    [],
+  );
 
   const replaceThreads = useCallback((next: ChatThread[]) => {
     const sorted = [...next].sort((a, b) =>
@@ -242,12 +311,13 @@ export default function HomeScreen() {
     let active = true;
     async function hydrate() {
       try {
-        const [storedThreads, storedPreferences, apiKey, githubToken] =
+        const [storedThreads, storedPreferences, apiKey, githubToken, storedJournal] =
           await Promise.all([
             loadThreads(),
             loadPreferences(),
             readApiKey(),
             readGitHubToken(),
+            loadJournal(),
           ]);
         if (!active) return;
         const hydratedThreads = storedThreads.length
@@ -257,6 +327,8 @@ export default function HomeScreen() {
         setThreads(hydratedThreads);
         setActiveThreadId(hydratedThreads[0].id);
         setPreferences(storedPreferences);
+        setApprovalPolicy(storedPreferences.approvalPolicy);
+        setJournal(storedJournal);
         setProviderBaseUrlDraft(storedPreferences.providerBaseUrl);
         setHasKey(Boolean(apiKey));
         setProviderConnected(
@@ -279,6 +351,15 @@ export default function HomeScreen() {
           setGithubRepositories([]);
         }
         if (!storedThreads.length) void saveThreads(hydratedThreads);
+        void detectCapabilities({
+          githubConnected: Boolean(githubToken),
+          hasVisionModel: Boolean(storedPreferences.visionModelId),
+          hasTranscriptionModel: Boolean(storedPreferences.transcriptionModelId),
+        })
+          .then((report) => {
+            if (active) setCapabilities(report);
+          })
+          .catch(() => undefined);
       } catch {
         if (!active) return;
         const initial = [createThread()];
@@ -312,6 +393,9 @@ export default function HomeScreen() {
     setShowError("");
     setDraft("");
     setPendingAttachments([]);
+    setAgentTask(null);
+    setVerification(null);
+    setPlanExpanded(false);
     Keyboard.dismiss();
   }, [replaceThreads]);
 
@@ -385,6 +469,13 @@ export default function HomeScreen() {
       setActiveThreadId(currentThread.id);
     }
     const createdAt = new Date().toISOString();
+    const agentPlan = buildAgentPlan({
+      request: text || "Examine the attached media.",
+      attachmentKinds: attachments.map((attachment) => attachment.kind),
+      githubConnected: Boolean(githubProfile),
+    });
+    setPlanExpanded(true);
+    setVerification(null);
     const userMessage: ChatMessage = {
       id: makeId("message"),
       role: "user",
@@ -477,6 +568,10 @@ export default function HomeScreen() {
       }));
     };
 
+    const taskController = new AgentTaskController(agentPlan, (task) =>
+      setAgentTask(task),
+    );
+
     try {
       const apiKey = await readApiKey();
       if (!apiKey)
@@ -561,6 +656,21 @@ export default function HomeScreen() {
               String(args.path ?? ""),
               String(args.content ?? ""),
             ),
+          );
+        if (name === "ai_workspace_create_directory")
+          return JSON.stringify(
+            await createAIWorkspaceDirectory(String(args.path ?? "")),
+          );
+        if (name === "ai_workspace_move_file")
+          return JSON.stringify(
+            await moveAIWorkspaceFile(
+              String(args.fromPath ?? ""),
+              String(args.toPath ?? ""),
+            ),
+          );
+        if (name === "ai_workspace_file_info")
+          return JSON.stringify(
+            await getAIWorkspaceFileInfo(String(args.path ?? "")),
           );
         if (name === "ai_workspace_delete_file")
           return JSON.stringify(
@@ -710,6 +820,9 @@ export default function HomeScreen() {
           ai_workspace_find_text: ["Searching workspace text", "workspace کے متن میں تلاش جاری ہے"],
           ai_workspace_read_file: ["Reading a private workspace file", "نجی workspace فائل پڑھی جا رہی ہے"],
           ai_workspace_write_file: ["Writing a private workspace file", "نجی workspace فائل لکھی جا رہی ہے"],
+          ai_workspace_create_directory: ["Creating a private workspace folder", "نجی workspace فولڈر بنایا جا رہا ہے"],
+          ai_workspace_move_file: ["Moving a private workspace file", "نجی workspace فائل منتقل کی جا رہی ہے"],
+          ai_workspace_file_info: ["Inspecting a private workspace file", "نجی workspace فائل کا جائزہ لیا جا رہا ہے"],
           ai_workspace_delete_file: ["Preparing to delete a private workspace file", "نجی workspace فائل حذف کرنے کی تیاری"],
           github_list_repositories: ["Listing GitHub repositories", "GitHub repositories دیکھی جا رہی ہیں"],
           github_list_files: ["Listing repository files", "repository کی فائلیں دیکھی جا رہی ہیں"],
@@ -730,13 +843,8 @@ export default function HomeScreen() {
         const label = `${t(englishLabel, urduLabel)}${suffix}`;
         const eventId = makeId("activity");
         const createdAt = new Date().toISOString();
-        const writeAction =
-          name === "github_update_file" ||
-          name === "github_create_issue" ||
-          name === "github_create_pull_request" ||
-          name === "github_create_branch" ||
-          name === "github_dispatch_workflow" ||
-          name === "ai_workspace_delete_file";
+        const planEventId = taskController.recordToolStart(name, label);
+        const approvalCheck = checkApproval(name, approvalPolicyRef.current);
         updateThread(currentThread.id, (thread) => ({
           ...thread,
           updatedAt: createdAt,
@@ -765,36 +873,47 @@ export default function HomeScreen() {
             ),
           }));
         try {
-          if (writeAction) {
-            const summary =
-              name === "ai_workspace_delete_file"
-                ? `Delete ${path} from the private AI workspace`
-                : name === "github_update_file"
-                ? `Commit ${path} in ${repo} on ${String(args.branch ?? "main")} (${String(args.content ?? "").length} characters)\n\nPreview:\n${String(args.content ?? "").slice(0, 1200)}`
-                  : name === "github_create_issue"
-                  ? `Create issue in ${repo}\nTitle: ${String(args.title ?? "")}\n\nBody:\n${String(args.body ?? "").slice(0, 1200)}`
-                  : name === "github_create_pull_request"
-                    ? `Open pull request in ${repo}\n${String(args.head ?? "")} → ${String(args.base ?? "")}\nTitle: ${String(args.title ?? "")}\n\nBody:\n${String(args.body ?? "").slice(0, 1200)}`
-                    : name === "github_create_branch"
-                      ? `Create branch ${String(args.branch ?? "")} from ${String(args.fromBranch ?? "main")} in ${repo}`
-                      : `Dispatch ${String(args.workflow ?? "")} on ${repo}, ref ${String(args.ref ?? "")}\nInputs: ${String(args.inputs ?? "{}").slice(0, 800)}`;
-            const approved = await requestSensitiveActionApproval(summary);
+          if (approvalCheck.denied) {
+            const declined = t(
+              "You declined this action earlier, so the agent skipped it.",
+              "آپ نے پہلے اس کام سے انکار کیا تھا، اس لیے ایجنٹ نے یہ چھوڑ دیا۔",
+            );
+            finishEvent(declined, "stopped");
+            taskController.recordToolEnd(planEventId, "blocked", declined);
+            return declined;
+          }
+          if (approvalCheck.required) {
+            const described = describeApproval(name, args, repo, path);
+            const approved = await requestAgentApproval({
+              id: makeId("approval"),
+              tool: name,
+              risk: approvalCheck.risk,
+              rememberable: approvalCheck.rememberable,
+              ...described,
+            });
             if (!approved) {
               const cancelled = t(
                 "Cancelled by you; no change was made.",
                 "آپ نے منسوخ کیا؛ کوئی تبدیلی نہیں کی گئی۔",
               );
               finishEvent(cancelled, "stopped");
+              taskController.recordToolEnd(planEventId, "blocked", cancelled);
               return cancelled;
             }
           }
           const result = await executeToolAction(name, args);
           finishEvent(`${label} — ${t("complete", "مکمل")}`, "complete");
+          taskController.recordToolEnd(planEventId, "done", label);
           return result;
         } catch (error) {
           finishEvent(
             `${label} — ${t("failed", "ناکام")}: ${safeTaskError(error)}`,
             "failed",
+          );
+          taskController.recordToolEnd(
+            planEventId,
+            "failed",
+            `${label} — ${safeTaskError(error)}`,
           );
           throw error;
         }
@@ -897,6 +1016,13 @@ export default function HomeScreen() {
               });
             }
           : undefined,
+        agentPlan,
+        [
+          capabilities?.summary ?? "",
+          journalContext(journalRef.current),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       );
       addActivity(
         t(
@@ -905,6 +1031,11 @@ export default function HomeScreen() {
         ),
         { activityKind: "model", activityPlatform: "AI provider" },
       );
+      const verifyIndex = agentPlan.steps.findIndex((step) => step.kind === "verify");
+      if (verifyIndex >= 0) {
+        taskController.setStatus("verifying");
+        taskController.advanceTo(verifyIndex);
+      }
       const answer = await requestChatCompletion({
         modelId: selectedTaskModelId,
         apiKey,
@@ -932,9 +1063,47 @@ export default function HomeScreen() {
         updatedAt: assistantMessage.createdAt,
         messages: [...thread.messages, assistantMessage],
       }));
+      taskController.finish("done");
+
+      // Local logic check: compare the answer against the evidence collected
+      // on this device. No shell or browser is available, so verification is
+      // a reasoning pass over real tool results rather than a test run.
+      const taskSnapshot = taskController.snapshot;
+      const report = verifyTask({
+        plan: taskSnapshot.plan,
+        events: taskSnapshot.events,
+        answer,
+        hadSources: taskSnapshot.events.some(
+          (event) => event.tool === "web_search" || event.tool === "read_public_web_page",
+        ),
+      });
+      setVerification(report);
+      setPlanExpanded(false);
+      const repair = buildRepairPrompt(report);
+      if (repair) {
+        addActivity(
+          t(
+            "Local check found an unsupported claim. Ask the agent to fix it.",
+            "مقامی جانچ نے ایک غیر ثابت شدہ بات پکڑی۔ ایجنٹ سے درست کرنے کو کہیں۔",
+          ),
+          { activityKind: "verify", activityPlatform: t("Verifier", "جانچ") },
+        );
+      }
+      void appendJournalEntry(
+        toJournalEntry({
+          id: makeId("journal"),
+          at: new Date(),
+          goal: text || agentPlan.goal,
+          plan: taskSnapshot.plan,
+          events: taskSnapshot.events,
+          verification: report,
+          status: "done",
+        }),
+      ).then((next) => setJournal(next));
     } catch (error) {
       const stopped = controller.signal.aborted;
       const safeError = safeTaskError(error);
+      taskController.finish(stopped ? "stopped" : "failed");
       updateActivity(
         stopped
           ? t("Request stopped by you.", "آپ نے درخواست روک دی۔")
@@ -1608,6 +1777,32 @@ export default function HomeScreen() {
               scrollRef.current?.scrollToEnd({ animated: true })
             }
           >
+            {agentTask ? (
+              <AgentPlanCard
+                task={agentTask}
+                isUrdu={preferences.language === "ur"}
+                expanded={planExpanded}
+                onToggle={() => setPlanExpanded((current) => !current)}
+              />
+            ) : null}
+            {verification ? (
+              <AgentReviewCard
+                task={agentTask}
+                report={verification}
+                capabilities={capabilities}
+                isUrdu={preferences.language === "ur"}
+                onRetry={() =>
+                  void dispatchUserTask(
+                    t(
+                      "Fix the unsupported parts of your previous answer and finish the task.",
+                      "پچھلے جواب کے غیر ثابت شدہ حصے درست کریں اور کام مکمل کریں۔",
+                    ),
+                    [],
+                  )
+                }
+                onShowCapabilities={() => setPanel("roadmap")}
+              />
+            ) : null}
             {!isReady ? (
               <View style={styles.loadingHistory}>
                 <ActivityIndicator color={C.teal} />
@@ -1685,6 +1880,39 @@ export default function HomeScreen() {
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={C.muted} />
                 </Pressable>
+                <View style={styles.checklist}>
+                  <Text style={styles.checklistTitle}>
+                    {t("Set up inside the app", "سب کچھ ایپ کے اندر ترتیب دیں")}
+                  </Text>
+                  <SetupStep
+                    done={providerConnected}
+                    label={t("Connect your AI provider key", "اپنے AI provider کی key جوڑیں")}
+                    onPress={openSettings}
+                  />
+                  <SetupStep
+                    done={Boolean(preferences.modelId)}
+                    label={t("Choose a chat model by name", "نام سے chat model منتخب کریں")}
+                    onPress={openSettings}
+                  />
+                  <SetupStep
+                    done={Boolean(githubProfile)}
+                    optional
+                    label={t("Connect GitHub for repository tasks", "repository کاموں کے لیے GitHub جوڑیں")}
+                    onPress={() => setPanel("settings")}
+                  />
+                  <Text style={styles.checklistNote}>
+                    {t(
+                      "Everything runs on this device: history, workspace files and settings stay on your phone. Nothing to install on a server.",
+                      "سب کچھ اسی فون پر چلتا ہے: تاریخ، workspace فائلیں اور ترتیبات آپ کے فون میں رہتی ہیں۔ کسی سرور پر کچھ انسٹال نہیں کرنا۔",
+                    )}
+                  </Text>
+                </View>
+                {providerConnected && preferences.modelId ? (
+                  <StarterPromptGrid
+                    isUrdu={preferences.language === "ur"}
+                    onPick={(prompt) => void dispatchUserTask(prompt, [])}
+                  />
+                ) : null}
               </View>
             )}
             {(isSending || isTranscribing) && (
@@ -2717,6 +2945,11 @@ export default function HomeScreen() {
         onFile={() => void addDocuments()}
         onAudio={() => void chooseAudioFile()}
       />
+      <ApprovalSheet
+        request={approvalRequest}
+        isUrdu={isUrdu}
+        onDecide={(decision) => approvalResolverRef.current?.(decision)}
+      />
     </SafeAreaView>
   );
 }
@@ -2831,7 +3064,8 @@ function ComposerIconButton({
 }
 
 function shouldAutoResearch(text: string): boolean {
-  return /\b(latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather|قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)\b/i.test(
+  // `\b` does not work for Urdu script, so Urdu keywords are matched literally.
+  return /(?:\b(?:latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather)\b)|(?:قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)/i.test(
     text,
   );
 }
@@ -2845,7 +3079,7 @@ function selectTaskModel(
     return preferences.visionModelId;
   if (
     preferences.codingModelId &&
-    /\b(code|coding|debug|bug|repository|repo|pull request|branch|function|typescript|javascript|python|api|deploy|build|test)\b|کوڈ|کوڈنگ|بگ|ریپوزٹری|برانچ|ٹیسٹ|ڈپلائے/i.test(
+    /(?:\b(?:code|coding|debug|bug|repository|repo|pull request|branch|function|typescript|javascript|python|api|deploy|build|test)\b)|(?:کوڈ|کوڈنگ|بگ|ریپوزٹری|برانچ|ٹیسٹ|ڈپلائے)/i.test(
       text,
     )
   )
@@ -3411,23 +3645,102 @@ function RoadmapCard({
   );
 }
 
-function requestSensitiveActionApproval(summary: string): Promise<boolean> {
-  const isGitHubAction = summary.includes(" in ") || summary.startsWith("Open pull request");
-  const message = `${summary}\n\n${isGitHubAction ? "This will change your GitHub account." : "This will permanently delete a private workspace file."} Continue?`;
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return Promise.resolve(window.confirm(message));
+function SetupStep({
+  done,
+  optional,
+  label,
+  onPress,
+}: {
+  done: boolean;
+  optional?: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={styles.setupStep}
+    >
+      <Ionicons
+        name={done ? "checkmark-circle" : "ellipse-outline"}
+        size={16}
+        color={done ? C.teal : C.muted}
+      />
+      <Text style={[styles.setupStepText, done && styles.setupStepTextDone]}>
+        {label}
+      </Text>
+      {optional ? (
+        <Text style={styles.setupStepOptional}>·</Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/**
+ * Build the exact, human-readable description of a consequential tool call so
+ * the approval card shows what will really happen rather than a vague label.
+ */
+function describeApproval(
+  tool: string,
+  args: Record<string, unknown>,
+  repo: string,
+  path: string,
+): { english: string; urdu: string; preview: string } {
+  const content = typeof args.content === "string" ? args.content : "";
+  const body = typeof args.body === "string" ? args.body : "";
+  const branch = String(args.branch ?? args.base ?? "main");
+  switch (tool) {
+    case "github_update_file":
+      return {
+        english: `Commit ${path || "the file"} in ${repo} on ${branch}.`,
+        urdu: `${repo} میں ${branch} پر ${path || "فائل"} commit ہوگی۔`,
+        preview: content.slice(0, 1600),
+      };
+    case "github_create_issue":
+      return {
+        english: `Create an issue in ${repo}.`,
+        urdu: `${repo} میں ایک issue بنے گا۔`,
+        preview: `${String(args.title ?? "")}\n\n${body.slice(0, 1200)}`,
+      };
+    case "github_create_pull_request":
+      return {
+        english: `Open a pull request in ${repo}: ${String(args.head ?? "")} → ${String(args.base ?? "main")}.`,
+        urdu: `${repo} میں pull request کھلے گی: ${String(args.head ?? "")} → ${String(args.base ?? "main")}۔`,
+        preview: `${String(args.title ?? "")}\n\n${body.slice(0, 1200)}`,
+      };
+    case "github_create_branch":
+      return {
+        english: `Create branch ${String(args.branch ?? "")} from ${String(args.fromBranch ?? "main")} in ${repo}.`,
+        urdu: `${repo} میں ${String(args.fromBranch ?? "main")} سے ${String(args.branch ?? "")} branch بنے گی۔`,
+        preview: "",
+      };
+    case "github_dispatch_workflow":
+      return {
+        english: `Run workflow ${String(args.workflow ?? "")} on ${repo} at ref ${String(args.ref ?? "")}.`,
+        urdu: `${repo} پر ${String(args.ref ?? "")} سے workflow ${String(args.workflow ?? "")} چلے گا۔`,
+        preview: String(args.inputs ?? "{}").slice(0, 800),
+      };
+    case "ai_workspace_delete_file":
+      return {
+        english: `Permanently delete ${path} from the private AI workspace.`,
+        urdu: `نجی AI workspace سے ${path} ہمیشہ کے لیے مٹ جائے گی۔`,
+        preview: "",
+      };
+    case "ai_workspace_write_file":
+      return {
+        english: `Save ${path} in the private AI workspace.`,
+        urdu: `نجی AI workspace میں ${path} محفوظ ہوگی۔`,
+        preview: content.slice(0, 1600),
+      };
+    default:
+      return {
+        english: `Run ${tool}.`,
+        urdu: `${tool} چلے گا۔`,
+        preview: "",
+      };
   }
-  return new Promise((resolve) => {
-    Alert.alert(
-      isGitHubAction ? "Approve GitHub action?" : "Approve deletion?",
-      message,
-      [
-        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-        { text: "Approve", style: "default", onPress: () => resolve(true) },
-      ],
-      { cancelable: true, onDismiss: () => resolve(false) },
-    );
-  });
 }
 
 function titleFromMessage(message: string): string {
@@ -3507,6 +3820,21 @@ function formatTime(value: string): string {
 }
 
 const styles = StyleSheet.create({
+  checklist: {
+    marginTop: 14,
+    backgroundColor: C.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 13,
+    gap: 9,
+  },
+  checklistTitle: { color: C.ink, fontSize: 12, fontWeight: "700" },
+  setupStep: { flexDirection: "row", alignItems: "center", gap: 8 },
+  setupStepText: { flex: 1, color: C.ink, fontSize: 12 },
+  setupStepTextDone: { color: C.muted },
+  setupStepOptional: { color: C.muted, fontSize: 12 },
+  checklistNote: { color: C.muted, fontSize: 10.5, lineHeight: 15, marginTop: 2 },
   safe: { flex: 1, backgroundColor: C.paper },
   autoDirection: { writingDirection: "auto", textAlign: "auto" },
   flex: { flex: 1 },

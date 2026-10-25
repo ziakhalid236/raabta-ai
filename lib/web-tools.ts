@@ -173,17 +173,28 @@ function validatePublicHttpsUrl(value: string): string {
 }
 
 function isPrivateHost(host: string): boolean {
-  if (
-    host === "localhost" || host.endsWith(".localhost") || host === "::1" ||
-    host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:") ||
-    host.startsWith("::ffff:")
-  ) return true;
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
+  // IPv6-only checks must not use bare "fc"/"fd" prefixes: those would also block
+  // ordinary domain names such as fcm.example.com, fdic.gov or fcbank.com.
+  if (host.includes(":")) {
+    return (
+      host.startsWith("fc") ||
+      host.startsWith("fd") ||
+      host.startsWith("fe80:") ||
+      host.startsWith("::ffff:") ||
+      host === "::" ||
+      host.startsWith("ff")
+    );
+  }
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!ipv4) return host.includes(":");
+  if (!ipv4) return false;
   const [a, b] = ipv4.slice(1).map(Number);
   if (a > 255 || b > 255) return true;
   return (
-    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||

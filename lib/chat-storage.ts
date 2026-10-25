@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { EMPTY_APPROVAL_POLICY, type ApprovalPolicy } from "@/lib/agent/approvals";
 import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
 
 export type ChatAttachment = {
@@ -58,12 +59,15 @@ export type ChatPreferences = {
   githubLogin: string;
   githubAvatarUrl: string;
   githubRepositories: string;
+  /** Remembered tool approvals so the agent does not re-ask for the same action. */
+  approvalPolicy: ApprovalPolicy;
 };
 
 const THREADS_KEY = "raabta.chat.threads.v2";
 const LEGACY_THREADS_KEY = "raabta.chat.threads.v1";
-const PREFERENCES_KEY = "raabta.chat.preferences.v3";
+const PREFERENCES_KEY = "raabta.chat.preferences.v4";
 const LEGACY_PREFERENCES_KEYS = [
+  "raabta.chat.preferences.v3",
   "raabta.chat.preferences.v2",
   "raabta.chat.preferences.v1",
 ];
@@ -86,6 +90,7 @@ export const DEFAULT_PREFERENCES: ChatPreferences = {
   githubLogin: "",
   githubAvatarUrl: "",
   githubRepositories: "",
+  approvalPolicy: EMPTY_APPROVAL_POLICY,
 };
 
 export async function loadThreads(): Promise<ChatThread[]> {
@@ -170,6 +175,7 @@ export async function loadPreferences(): Promise<ChatPreferences> {
       githubRepositories: isCurrentSchema
         ? stringValue(data.githubRepositories)
         : "",
+      approvalPolicy: isCurrentSchema ? parseApprovalPolicy(data.approvalPolicy) : EMPTY_APPROVAL_POLICY,
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -249,6 +255,20 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
       (typeof item.extractedText === "string" &&
         item.extractedText.length <= 120_000))
   );
+}
+
+function parseApprovalPolicy(value: unknown): ApprovalPolicy {
+  const data = asRecord(value);
+  if (!data) return EMPTY_APPROVAL_POLICY;
+  return {
+    alwaysAllow: stringList(data.alwaysAllow),
+    deny: stringList(data.deny),
+  };
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string").slice(0, 64);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
