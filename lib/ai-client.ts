@@ -121,9 +121,10 @@ export async function requestChatCompletion(args: {
           });
           continue;
         }
-        const result = name
+        const validation = validateToolArguments(name, toolArgs, args.tools ?? []);
+        const result = validation ?? (name
           ? await args.executeTool(name, toolArgs)
-          : "Unknown tool call.";
+          : "Unknown tool call.");
         completedToolActions.set(signature, result);
         messages.push({
           role: "tool",
@@ -133,6 +134,31 @@ export async function requestChatCompletion(args: {
       }
       if (duplicateActionRequested) break;
       continue;
+    }
+    if (assistantContent && args.executeTool && args.tools?.length) {
+      const textToolCall = parseTextToolCall(assistantContent, args.tools);
+      if (textToolCall) {
+        const signature = `${textToolCall.name}:${JSON.stringify(textToolCall.arguments)}`;
+        const earlierResult = completedToolActions.get(signature);
+        messages.push({ role: "assistant", content: assistantContent });
+        if (earlierResult !== undefined) {
+          messages.push({
+            role: "user",
+            content: `The exact action ${textToolCall.name} was already executed. Earlier result: ${earlierResult}. Do not repeat it; answer using the result already received.`,
+          });
+          break;
+        }
+        const result = await args.executeTool(
+          textToolCall.name,
+          textToolCall.arguments,
+        );
+        completedToolActions.set(signature, result);
+        messages.push({
+          role: "user",
+          content: `Raabta tool result for ${textToolCall.name}:\n${result.slice(0, 40_000)}\n\nUse this result to continue. If another action is needed, request one listed tool; otherwise answer the user.`,
+        });
+        continue;
+      }
     }
     if (!assistantContent) {
       throw new AIRequestError(
@@ -271,4 +297,81 @@ function extractText(content: unknown): string {
     })
     .join("")
     .trim();
+}
+
+type TextToolCall = { name: string; arguments: Record<string, unknown> };
+
+function parseTextToolCall(
+  content: string,
+  tools: unknown[],
+): TextToolCall | null {
+  const marker = "[[RAABTA_TOOL_CALL]]";
+  const closing = "[[/RAABTA_TOOL_CALL]]";
+  if (!content.includes(marker) && !content.includes(closing)) return null;
+  const match = /^\[\[RAABTA_TOOL_CALL\]\](\{[\s\S]*\})\[\[\/RAABTA_TOOL_CALL\]\]$/.exec(
+    content.trim(),
+  );
+  if (!match)
+    throw new AIRequestError(
+      "The provider returned a malformed Raabta tool request. No action was run; try again or choose a tool-compatible model.",
+    );
+  let value: unknown;
+  try {
+    value = JSON.parse(match[1]);
+  } catch {
+    throw new AIRequestError(
+      "The provider returned invalid JSON for a tool request. No action was run.",
+    );
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new AIRequestError("The provider returned an invalid tool request.");
+  const call = value as Record<string, unknown>;
+  if (
+    typeof call.name !== "string" ||
+    !call.arguments ||
+    typeof call.arguments !== "object" ||
+    Array.isArray(call.arguments)
+  )
+    throw new AIRequestError("The provider returned an invalid tool request.");
+  const toolArgs = call.arguments as Record<string, unknown>;
+  const validation = validateToolArguments(call.name, toolArgs, tools);
+  if (validation)
+    throw new AIRequestError(
+      `The provider requested an unavailable or invalid tool action (${validation}). No action was run.`,
+    );
+  return { name: call.name, arguments: toolArgs };
+}
+
+function validateToolArguments(
+  name: string,
+  args: Record<string, unknown>,
+  tools: unknown[],
+): string | null {
+  const definition = tools.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    const fn = (item as { function?: { name?: unknown } }).function;
+    return fn?.name === name;
+  }) as
+    | {
+        function?: {
+          parameters?: {
+            properties?: Record<string, { type?: unknown }>;
+            required?: string[];
+          };
+        };
+      }
+    | undefined;
+  if (!definition) return "that tool is not connected or enabled";
+  const parameters = definition.function?.parameters;
+  const properties = parameters?.properties ?? {};
+  for (const key of Object.keys(args)) {
+    if (!Object.hasOwn(properties, key)) return `unexpected argument ${key}`;
+    const expected = properties[key]?.type;
+    if (expected === "string" && typeof args[key] !== "string")
+      return `argument ${key} must be text`;
+  }
+  for (const key of parameters?.required ?? []) {
+    if (!Object.hasOwn(args, key)) return `required argument ${key} is missing`;
+  }
+  return null;
 }

@@ -35,7 +35,7 @@ import {
   requestAudioTranscription,
   requestChatCompletion,
 } from "@/lib/ai-client";
-import { LIVE_TOOL_DEFINITIONS } from "@/lib/ai-tools";
+import { getLiveToolDefinitions } from "@/lib/ai-tools";
 import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
 import {
   deleteAIWorkspaceFile,
@@ -457,6 +457,32 @@ export default function HomeScreen() {
             "محفوظ storage میں API key نہیں ملی۔ Settings میں دوبارہ درج کریں۔",
           ),
         );
+      const githubToken = await readGitHubToken();
+      const availableTools = getLiveToolDefinitions({
+        githubConnected: Boolean(githubToken),
+      });
+      const githubContext = githubToken
+        ? JSON.stringify({
+            connected: true,
+            account: githubProfile?.login || preferences.githubLogin || null,
+            repositories: githubRepositories.map((repository) => ({
+              fullName: repository.fullName,
+              private: repository.private,
+              defaultBranch: repository.defaultBranch,
+              description: repository.description,
+            })),
+            cachedRepositoryList: true,
+            availableActions: [
+              "list/refresh repositories",
+              "list repository files",
+              "read text files",
+              "update and commit a file (requires approval)",
+              "create an issue (requires approval)",
+              "open a pull request (requires approval)",
+            ],
+            unavailableActions: ["delete repositories", "merge pull requests", "run workflows"],
+          })
+        : "";
       const executeToolAction = async (
         name: string,
         args: Record<string, unknown>,
@@ -495,13 +521,24 @@ export default function HomeScreen() {
           return JSON.stringify(
             await deleteAIWorkspaceFile(String(args.path ?? "")),
           );
-        const githubToken = await readGitHubToken();
         if (!githubToken)
           return "GitHub is not connected in this app. Ask the user to connect it first.";
-        if (name === "github_list_repositories")
-          return JSON.stringify(
-            await listGitHubRepositories(githubToken, controller.signal),
+        if (name === "github_list_repositories") {
+          const repositories = await listGitHubRepositories(
+            githubToken,
+            controller.signal,
           );
+          setGithubRepositories(repositories);
+          const nextPreferences = {
+            ...preferences,
+            githubRepositories: JSON.stringify(repositories),
+          };
+          setPreferences(nextPreferences);
+          void savePreferences(nextPreferences).catch(() => {
+            setSettingsNotice("The refreshed GitHub repository list could not be saved locally.");
+          });
+          return JSON.stringify(repositories);
+        }
         if (name === "github_list_files")
           return JSON.stringify(
             await listGitHubRepositoryFiles(
@@ -699,7 +736,8 @@ export default function HomeScreen() {
       const providerMessages = await makeProviderMessages(
         latestThread.messages,
         controller.signal,
-        preferences.githubRepositories,
+        githubContext,
+        availableTools,
       );
       const answer = await requestChatCompletion({
         modelId: preferences.modelId,
@@ -707,7 +745,7 @@ export default function HomeScreen() {
         messages: providerMessages,
         signal: controller.signal,
         baseUrl: preferences.providerBaseUrl,
-        tools: LIVE_TOOL_DEFINITIONS,
+        tools: availableTools,
         executeTool,
       });
       const assistantMessage: ChatMessage = {

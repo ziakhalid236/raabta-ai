@@ -14,7 +14,7 @@ export type AiToolDefinition = {
 
 const string = (description: string) => ({ type: "string", description });
 
-export const LIVE_TOOL_DEFINITIONS: AiToolDefinition[] = [
+const BASE_TOOLS: AiToolDefinition[] = [
   {
     type: "function",
     function: {
@@ -39,113 +39,6 @@ export const LIVE_TOOL_DEFINITIONS: AiToolDefinition[] = [
         type: "object",
         properties: { url: string("A complete public HTTPS URL") },
         required: ["url"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "github_list_repositories",
-      description:
-        "List repositories visible to the connected GitHub account. The token is held by the app and is never an argument.",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "github_list_files",
-      description:
-        "List files and directories in a connected GitHub repository.",
-      parameters: {
-        type: "object",
-        properties: {
-          repository: string("owner/repository"),
-          path: string("Directory path, empty for root"),
-          branch: string("Optional branch"),
-        },
-        required: ["repository"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "github_read_file",
-      description: "Read a text file from a connected GitHub repository.",
-      parameters: {
-        type: "object",
-        properties: {
-          repository: string("owner/repository"),
-          path: string("File path"),
-          branch: string("Optional branch"),
-        },
-        required: ["repository", "path"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "github_update_file",
-      description:
-        "Prepare a file update and commit in a connected GitHub repository. The app asks the user to approve before changing GitHub.",
-      parameters: {
-        type: "object",
-        properties: {
-          repository: string("owner/repository"),
-          path: string("File path"),
-          content: string("Complete new file content"),
-          message: string("Commit message"),
-          branch: string("Optional branch"),
-        },
-        required: ["repository", "path", "content", "message"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "github_create_issue",
-      description:
-        "Prepare an issue in a connected GitHub repository. The app asks the user to approve before creating it.",
-      parameters: {
-        type: "object",
-        properties: {
-          repository: string("owner/repository"),
-          title: string("Issue title"),
-          body: string("Issue body"),
-        },
-        required: ["repository", "title", "body"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "github_create_pull_request",
-      description:
-        "Create a pull request. Merging is not available as an automatic tool and requires approval.",
-      parameters: {
-        type: "object",
-        properties: {
-          repository: string("owner/repository"),
-          title: string("Pull request title"),
-          body: string("Pull request body"),
-          head: string("Source branch"),
-          base: string("Target branch"),
-        },
-        required: ["repository", "title", "body", "head", "base"],
         additionalProperties: false,
       },
     },
@@ -210,3 +103,126 @@ export const LIVE_TOOL_DEFINITIONS: AiToolDefinition[] = [
     },
   },
 ];
+
+const GITHUB_TOOLS: AiToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "github_list_repositories",
+      description:
+        "List or refresh repositories visible to the connected GitHub account. The token is held by the app and is never an argument.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_list_files",
+      description:
+        "List files and directories in a connected GitHub repository the user can access.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          path: string("Directory path, empty for root"),
+          branch: string("Optional branch"),
+        },
+        required: ["repository"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_read_file",
+      description: "Read a text file from a connected GitHub repository.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          path: string("File path"),
+          branch: string("Optional branch"),
+        },
+        required: ["repository", "path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_update_file",
+      description:
+        "Prepare a text file update and commit in a connected GitHub repository. The app asks the user to approve the exact change before writing.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          path: string("File path"),
+          content: string("Complete new file content"),
+          message: string("Commit message"),
+          branch: string("Optional branch"),
+        },
+        required: ["repository", "path", "content", "message"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_create_issue",
+      description:
+        "Prepare an issue in a connected GitHub repository. The app asks the user to approve the exact issue before creating it.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          title: string("Issue title"),
+          body: string("Issue body"),
+        },
+        required: ["repository", "title", "body"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_create_pull_request",
+      description:
+        "Prepare a pull request in a connected GitHub repository. The app asks the user to approve before creating it. Merging is not available as an automatic tool.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          title: string("Pull request title"),
+          body: string("Pull request body"),
+          head: string("Source branch"),
+          base: string("Target branch"),
+        },
+        required: ["repository", "title", "body", "head", "base"],
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+export function getLiveToolDefinitions(options: {
+  githubConnected: boolean;
+}): AiToolDefinition[] {
+  return options.githubConnected
+    ? [...BASE_TOOLS.slice(0, 2), ...GITHUB_TOOLS, ...BASE_TOOLS.slice(2)]
+    : [...BASE_TOOLS];
+}
+
+/** @deprecated Prefer getLiveToolDefinitions with the current connection state. */
+export const LIVE_TOOL_DEFINITIONS = getLiveToolDefinitions({
+  githubConnected: true,
+});

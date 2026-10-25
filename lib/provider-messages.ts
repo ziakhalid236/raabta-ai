@@ -1,3 +1,4 @@
+import type { AiToolDefinition } from "@/lib/ai-tools";
 import type { ChatContentPart, ChatRequestMessage } from "@/lib/ai-client";
 import type { ChatMessage } from "@/lib/chat-storage";
 import { readImageAsDataUrl } from "@/lib/mobile-media";
@@ -8,17 +9,30 @@ export async function makeProviderMessages(
   messages: ChatMessage[],
   signal: AbortSignal,
   githubContext = "",
+  tools: AiToolDefinition[] = [],
 ): Promise<ChatRequestMessage[]> {
   const output: ChatRequestMessage[] = [];
+  const toolList = tools.map(({ function: tool }) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }));
   output.push({
     role: "system",
     content:
-      "Local workspace boundary: you may list, read and write text files only through ai_workspace tools inside Raabta's private, size-limited app folder. This is not a terminal; you cannot run shell commands, install packages, access other phone files, or claim that you executed commands. Repository files and unrelated phone storage are outside this workspace. GitHub write tools are separately approval-gated by the app.",
+      "Raabta app capabilities and safety rules: The tools listed in the following system context are the only actions you can actually perform. Use a tool for real work; never claim an action succeeded unless its tool result confirms it. The private AI workspace is limited to Raabta app files; it is not a terminal and cannot run shell commands, install packages, or access other phone files. GitHub write actions require the user's explicit in-app approval before any change. Never request or reveal API tokens.\n\nTool compatibility: use native function/tool calls when supported. If this provider returns only plain text and you need a listed tool, return exactly this single-line envelope and nothing else: [[RAABTA_TOOL_CALL]]{\"name\":\"exact_tool_name\",\"arguments\":{}}[[/RAABTA_TOOL_CALL]]. Use valid JSON, only a listed tool name, and only its declared arguments. Do not put the envelope in a code block. After the app returns a tool result, continue normally; never repeat an identical action that already succeeded. If no listed tool is appropriate, answer normally and be clear about the limitation.\n\nAvailable tool definitions (authoritative):\n" +
+      JSON.stringify(toolList),
   });
   if (githubContext.trim()) {
     output.push({
       role: "system",
-      content: `The user explicitly connected GitHub. The app fetched the following repository metadata; it contains no token. Do not claim access to files not listed here. GitHub write tools require user approval before any change.\n${githubContext.slice(0, 20_000)}`,
+      content: `Connected GitHub account and visible repository inventory (metadata only; no credential is included):\n${githubContext.slice(0, 20_000)}\nThe cached repository list may be stale; use github_list_repositories to refresh it when needed. You may list repositories, inspect repository files, and read text files. You may update/commit a file, create an issue, or open a pull request only after the app presents the exact operation for user approval. The connected token's permissions still apply; report permission/rate-limit errors honestly. Do not claim access to files until a read tool returns them.`,
+    });
+  } else {
+    output.push({
+      role: "system",
+      content:
+        "GitHub is not connected in this app session. No GitHub tools are available. Do not claim to see or modify a GitHub account or repository; ask the user to connect GitHub in Accounts first.",
     });
   }
   for (const message of messages) {
@@ -28,7 +42,6 @@ export async function makeProviderMessages(
       output.push({ role: "assistant", content: message.content });
       continue;
     }
-
     const parts: ChatContentPart[] = [];
     const text = message.content.trim();
     if (text) parts.push({ type: "text", text });
