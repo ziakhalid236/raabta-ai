@@ -12,7 +12,7 @@ Start, reopen and resume locally stored conversations, stop an in-flight request
 
 ### Stage 2 — Selected research and media
 
-- Search public web results using DuckDuckGo's HTML search page. A successful search attaches up to six real source URLs to the chat; search errors return no invented citations.
+- Search public web results using DuckDuckGo's HTML search page, then follow up to three public result pages for bounded extraction. If a page blocks reading, its real URL remains attached as a clearly marked snippet source; search errors return no invented citations.
 - Enter a public HTTPS URL to read a bounded excerpt from supported HTML, text, JSON or XML, save a `.txt` rendition in app-private documents and ask your selected model about it. Pages over 4 MB are rejected; the model receives at most 35,000 extracted characters. Login-required sites, PDF/binary extraction and private account browsing are not supported.
 - Choose up to four combined image/document attachments from the gallery or system file picker. Compact image thumbnails can be opened full-size. Image questions require a selected model whose AI provider catalog metadata lists `image` input; unsupported image requests are blocked before network dispatch. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters.
 - Record a voice message after granting microphone permission, or select an audio file. Choose an optional transcription model discovered from AI provider's transcription catalog; it uses the same AI provider key. Audio uploads are limited to 20 MB. The transcript returns to the composer for review and is never sent automatically.
@@ -26,7 +26,7 @@ Web research, source retrieval, local attachment preparation and model answering
 
 The GitHub icon in the composer opens **Accounts**. Users may provide their own personal access token. Raabta checks the profile and lists repositories visible to that token; the assistant receives the login, cached repository names/default branches and an explicit list of available GitHub actions. It can list/refresh repositories, list files, read text files, create isolated branches, inspect workflow runs, and dispatch an existing repository-controlled workflow. File commits, issue creation, pull requests, branch creation, and workflow dispatch each require an in-app approval prompt. The token is stored separately from the provider key and is never included in model messages. Grant only the repository permissions you intend to use. Disconnect removes the token from Raabta but does not revoke it at GitHub.
 
-Arbitrary shell execution, repository deletion, pull-request merging, and unmanaged deployment actions are not available. Engineering checks run only through workflow files already committed to the selected repository; Raabta does not upload or execute arbitrary shell scripts. The public source repository is a release mirror, not an in-app account connection.
+Arbitrary shell execution, repository deletion, pull-request merging, and unmanaged deployment actions are not available. Workflow dispatch is restricted to `engineering-checks.yml` on the `main` or `master` branch, with an approval preview of the exact ref and inputs. Engineering checks run only through workflow files already committed to the selected repository; Raabta does not upload or execute arbitrary shell scripts. The public source repository is a release mirror, not an in-app account connection.
 
 ## Privacy and permissions
 

@@ -100,6 +100,8 @@ import { pickChatDocuments, pickChatImages } from "@/lib/mobile-media";
 import { makeProviderMessages } from "@/lib/provider-messages";
 import {
   downloadReadablePage,
+  isPublicHttpsUrl,
+  researchWeb,
   searchWeb,
   type WebSource,
   WebToolError,
@@ -634,6 +636,14 @@ export default function HomeScreen() {
             }),
           );
         if (name === "github_dispatch_workflow") {
+          const workflow = String(args.workflow).trim();
+          const ref = String(args.ref).trim();
+          if (workflow !== "engineering-checks.yml")
+            throw new Error(
+              "For safety, Raabta can dispatch only the repository engineering-checks.yml workflow.",
+            );
+          if (!/^(main|master|refs\/heads\/(main|master))$/.test(ref))
+            throw new Error("For safety, workflow dispatch is limited to the main or master branch.");
           let inputs: Record<string, string> | undefined;
           if (typeof args.inputs === "string" && args.inputs.trim()) {
             const parsed: unknown = JSON.parse(args.inputs);
@@ -647,8 +657,8 @@ export default function HomeScreen() {
             await dispatchGitHubWorkflow({
               token: githubToken,
               repository: String(args.repository),
-              workflow: String(args.workflow),
-              ref: String(args.ref),
+              workflow,
+              ref,
               inputs,
               signal: controller.signal,
             }),
@@ -746,14 +756,14 @@ export default function HomeScreen() {
               name === "ai_workspace_delete_file"
                 ? `Delete ${path} from the private AI workspace`
                 : name === "github_update_file"
-                ? `Commit ${path} in ${repo}`
+                ? `Commit ${path} in ${repo} on ${String(args.branch ?? "main")} (${String(args.content ?? "").length} characters)\n\nPreview:\n${String(args.content ?? "").slice(0, 1200)}`
                   : name === "github_create_issue"
-                  ? `Create issue in ${repo}: ${String(args.title ?? "")}`
+                  ? `Create issue in ${repo}\nTitle: ${String(args.title ?? "")}\n\nBody:\n${String(args.body ?? "").slice(0, 1200)}`
                   : name === "github_create_pull_request"
-                    ? `Open pull request in ${repo}: ${String(args.title ?? "")}`
+                    ? `Open pull request in ${repo}\n${String(args.head ?? "")} → ${String(args.base ?? "")}\nTitle: ${String(args.title ?? "")}\n\nBody:\n${String(args.body ?? "").slice(0, 1200)}`
                     : name === "github_create_branch"
-                      ? `Create branch ${String(args.branch ?? "")} in ${repo}`
-                      : `Dispatch workflow ${String(args.workflow ?? "")} on ${repo}`;
+                      ? `Create branch ${String(args.branch ?? "")} from ${String(args.fromBranch ?? "main")} in ${repo}`
+                      : `Dispatch ${String(args.workflow ?? "")} on ${repo}, ref ${String(args.ref ?? "")}\nInputs: ${String(args.inputs ?? "{}").slice(0, 800)}`;
             const approved = await requestSensitiveActionApproval(summary);
             if (!approved) {
               const cancelled = t(
@@ -800,7 +810,8 @@ export default function HomeScreen() {
           { activityKind: "research", activityPlatform: "Web research" },
         );
       } else if (shouldAutoResearch(text)) {
-        const retrieved = await searchWeb(text, controller.signal);
+        const research = await researchWeb(text, controller.signal);
+        const retrieved = research.sources;
         updateThread(currentThread.id, (thread) => ({
           ...thread,
           messages: thread.messages.map((message) =>
@@ -814,13 +825,25 @@ export default function HomeScreen() {
               : message,
           ),
         }));
+        addActivity(
+          research.failedUrls.length
+            ? t(
+                `Read ${Math.max(0, retrieved.length - research.failedUrls.length)} pages; ${research.failedUrls.length} links remain available as snippets for review.`,
+                `${Math.max(0, retrieved.length - research.failedUrls.length)} صفحات پڑھے گئے؛ ${research.failedUrls.length} لنکس review کے لیے snippets کی صورت میں موجود ہیں۔`,
+              )
+            : t(
+                `Read ${Math.min(3, retrieved.length)} source pages before analysis.`,
+                `تجزیے سے پہلے ${Math.min(3, retrieved.length)} source صفحات پڑھے گئے۔`,
+              ),
+          { activityKind: "research", activityPlatform: "Web research" },
+        );
       }
       if (controller.signal.aborted)
         throw new Error("Request stopped before sending.");
       addActivity(
         t(
-          `Selected the task model: ${selectedTaskModelId}`,
-          `اس task کے لیے model منتخب کیا گیا: ${selectedTaskModelId}`,
+          `Selected the task model: ${preferences.modelName || "the configured model"}`,
+          `اس task کے لیے model منتخب کیا گیا: ${preferences.modelName || "configured model"}`,
         ),
         { activityKind: "model", activityPlatform: "AI provider" },
       );
@@ -927,15 +950,15 @@ export default function HomeScreen() {
         "DuckDuckGo پر عوامی ذرائع تلاش ہو رہے ہیں…",
       ),
       resolve: async (signal) => {
-        const results = await searchWeb(query, signal);
-        return results.map((source) => sourceToAttachment(source));
+        const results = await researchWeb(query, signal);
+        return results.sources.map((source) => sourceToAttachment(source));
       },
     });
   }
 
   function startPageRead() {
     const url = pageUrlDraft.trim();
-    if (!isHttpsUrl(url)) {
+    if (!isPublicHttpsUrl(url)) {
       setShowError("Enter a complete public HTTPS page URL.");
       return;
     }
@@ -2115,8 +2138,8 @@ export default function HomeScreen() {
           {showError ? <Notice text={showError} danger /> : null}
           <Notice
             text={t(
-              "The search query goes to DuckDuckGo. Retrieved excerpts, image/document text and your question are sent to the AI endpoint you chose only when you run the task. Login-required websites, PDF/binary URL extraction and private account connectors are not included in this release.",
-              "تلاش کا سوال DuckDuckGo کو جاتا ہے۔ منتخب task چلانے پر ہی excerpts، image/document text اور آپ کا سوال آپ کے AI endpoint کو بھیجے جاتے ہیں۔ Login-required ویب سائٹس، PDF/binary پڑھنا اور private account connections اس ورژن میں شامل نہیں۔",
+              "Research searches DuckDuckGo, follows up to three public HTTPS result pages, and keeps blocked links as clearly marked snippets. Retrieved excerpts, image/document text and your question are sent to the AI endpoint you chose only when you run the task. Login-required websites, PDF/binary extraction and private account connectors are not included.",
+              "Research DuckDuckGo پر تلاش کرتا ہے، تین تک عوامی HTTPS صفحات پڑھتا ہے، اور blocked لنکس کو واضح snippets کے طور پر رکھتا ہے۔ منتخب task چلانے پر ہی excerpts، image/document text اور سوال آپ کے AI endpoint کو بھیجے جاتے ہیں۔ Login-required ویب سائٹس، PDF/binary پڑھنا اور private account connections شامل نہیں۔",
             )}
           />
         </PanelShell>
@@ -3007,8 +3030,7 @@ function MessageRow({
             selectable
             markdownStyle={assistantMarkdownStyle}
             onLinkPress={({ url }) => {
-              if (isHttpsUrl(url))
-                void Linking.openURL(url).catch(() => undefined);
+              void openSafeExternalUrl(url);
             }}
           />
         )}
@@ -3033,13 +3055,8 @@ function MessageRow({
                   }
                   disabled={!attachment.sourceUrl}
                   onPress={() => {
-                    if (
-                      attachment.sourceUrl &&
-                      isHttpsUrl(attachment.sourceUrl)
-                    )
-                      void Linking.openURL(attachment.sourceUrl).catch(
-                        () => undefined,
-                      );
+                    if (attachment.sourceUrl)
+                      void openSafeExternalUrl(attachment.sourceUrl);
                   }}
                   style={styles.messageAttachmentChip}
                 >
@@ -3377,12 +3394,23 @@ function safeTaskError(error: unknown): string {
   return "Could not complete this task. Check the connection, file type and provider settings, then try again.";
 }
 
-function isHttpsUrl(value: string): boolean {
+async function openSafeExternalUrl(value: string): Promise<void> {
+  if (!isPublicHttpsUrl(value)) {
+    Alert.alert(
+      "Link blocked",
+      "For your safety, Raabta only opens public HTTPS links without login credentials.",
+    );
+    return;
+  }
   try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" && Boolean(parsed.hostname);
+    const canOpen = await Linking.canOpenURL(value);
+    if (!canOpen) throw new Error("unsupported");
+    await Linking.openURL(value);
   } catch {
-    return false;
+    Alert.alert(
+      "Could not open link",
+      "Copy the visible HTTPS link and open it in your browser, or try again.",
+    );
   }
 }
 

@@ -235,7 +235,7 @@ const GITHUB_TOOLS: AiToolDefinition[] = [
     function: {
       name: "github_dispatch_workflow",
       description:
-        "Start an existing GitHub Actions workflow on a selected branch. The app asks the user to approve before dispatching it.",
+        "Start only the repository-controlled engineering-checks.yml workflow on main or master. The app validates the exact workflow/ref and asks the user to approve before dispatching it.",
       parameters: {
         type: "object",
         properties: {

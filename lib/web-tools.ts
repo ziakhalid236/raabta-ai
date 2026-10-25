@@ -5,6 +5,11 @@ export type WebSource = {
   downloadedUri?: string;
 };
 
+export type WebResearchResult = {
+  sources: WebSource[];
+  failedUrls: string[];
+};
+
 export class WebToolError extends Error {
   constructor(message: string) {
     super(message);
@@ -38,6 +43,33 @@ export async function searchWeb(query: string, signal: AbortSignal): Promise<Web
     throw new WebToolError("DuckDuckGo did not return readable search results. No source or answer was invented.");
   }
   return sources;
+}
+
+/** Search, then follow a bounded number of public results so answers use page text rather than snippets alone. */
+export async function researchWeb(
+  query: string,
+  signal: AbortSignal,
+): Promise<WebResearchResult> {
+  const searchResults = await searchWeb(query, signal);
+  const followed = await Promise.all(
+    searchResults.slice(0, 3).map(async (source) => {
+      try {
+        return await readWebPage(source.url, signal);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        return null;
+      }
+    }),
+  );
+  const extracted = followed.filter((source): source is WebSource => Boolean(source));
+  const extractedUrls = new Set(extracted.map((source) => source.url));
+  return {
+    sources: [...extracted, ...searchResults.filter((source) => !extractedUrls.has(source.url))],
+    failedUrls: searchResults
+      .slice(0, 3)
+      .filter((source) => !extractedUrls.has(source.url))
+      .map((source) => source.url),
+  };
 }
 
 /** Download a public HTTPS HTML/text/JSON page into memory and return bounded readable text. */
@@ -117,6 +149,15 @@ function parseSearchResults(html: string): WebSource[] {
     const snippet = snippetMatch ? decodeEntities(stripTags(snippetMatch[1])).replace(/\s+/g, " ").trim() : "";
     return [{ title: title.slice(0, 180), url: target, snippet: snippet.slice(0, 900) }];
   });
+}
+
+export function isPublicHttpsUrl(value: string): boolean {
+  try {
+    validatePublicHttpsUrl(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validatePublicHttpsUrl(value: string): string {
