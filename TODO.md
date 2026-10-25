@@ -20,7 +20,7 @@
 ## Release and device/provider state
 
 - [x] **Public GitHub source and previous APK.** The public mirror is `https://github.com/ziakhalid236/raabta-ai`. The earlier successful APK artifact came from public commit `ade0635` (66 MB, SHA-256 `cc8c4ecb42d44b08c1265af5853a97f170287021bdd9946f9ac428d282441241`) and remains a test APK, not a Play Store signed release.
-- [ ] **Publish this implementation and rebuild downloadable APK.** Update the existing public mirror without changing the Manus-managed canonical remote; let GitHub Actions build the current `main`; confirm the actual successful workflow run and APK artifact contains the bundled JavaScript before reporting a new APK path/hash.
+- [x] **Publish this implementation and rebuild downloadable APK.** Implementation commit `d91b729` is published to the existing public mirror. GitHub Actions run `40195965125` built `main`, verified the embedded `assets/index.android.bundle`, uploaded `raabta-ai-test-apk`, and the downloaded `app-release.apk` is 70,626,978 bytes with SHA-256 `18933c5ad71c9c36f71ec383ebcf61161901aced49eeb69f5c4d8ee968840066`.
 - [ ] **Native device verification.** Verify SecureStore, account storage, chat history, gallery/document pickers, microphone permission/recording, model selection and the updated composer on an actual Android device/build. Expo Web Preview and TypeScript checks alone do not prove native behavior.
 - [ ] **Live provider/GitHub verification.** No AI provider API key, model account, or GitHub PAT was supplied. Do not claim live generation, model entitlement, billing, vision, transcription, or GitHub profile connection succeeded before the user connects those services in the app.
 
