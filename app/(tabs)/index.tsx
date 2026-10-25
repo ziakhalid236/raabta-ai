@@ -9,6 +9,7 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -2801,6 +2802,154 @@ function activityVisual(message: ChatMessage): { icon: IconName; platform: strin
   }
 }
 
+function LiveActivityIcon({
+  icon,
+  color,
+  status,
+}: {
+  icon: IconName;
+  color: string;
+  status: ChatMessage["activityStatus"];
+}) {
+  const pulse = useMemo(() => new Animated.Value(1), []);
+  const rotation = useMemo(() => new Animated.Value(0), []);
+
+  useEffect(() => {
+    if (status !== "working") {
+      pulse.stopAnimation();
+      rotation.stopAnimation();
+      Animated.spring(pulse, {
+        toValue: 1,
+        friction: 7,
+        tension: 90,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1.08,
+          duration: 720,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.96,
+          duration: 720,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const rotationLoop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 1800,
+        useNativeDriver: true,
+      }),
+    );
+    pulseLoop.start();
+    rotationLoop.start();
+    return () => {
+      pulseLoop.stop();
+      rotationLoop.stop();
+    };
+  }, [pulse, rotation, status]);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+  return (
+    <Animated.View
+      style={[
+        styles.activityIconBadge,
+        styles.activityIcon3d,
+        { transform: [{ scale: pulse }] },
+      ]}
+    >
+      <View style={[styles.activityIconDepth, { backgroundColor: C.tealPale }]} />
+      <Animated.View
+        style={[
+          styles.activityIconFace,
+          { borderColor: color, transform: [{ rotate }] },
+        ]}
+      >
+        <Ionicons name={icon} size={15} color={color} />
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+function LiveActivityRow({ message }: { message: ChatMessage }) {
+  const status = message.activityStatus ?? "complete";
+  const entrance = useMemo(() => new Animated.Value(0), []);
+  const visual = activityVisual(message);
+  const iconColor =
+    status === "failed" ? C.danger : status === "stopped" ? C.muted : C.teal;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(entrance, {
+        toValue: 1,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [entrance]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.activityRow,
+        status === "failed" && styles.activityRowFailed,
+        status === "stopped" && styles.activityRowStopped,
+        {
+          opacity: entrance,
+          transform: [
+            {
+              translateY: entrance.interpolate({
+                inputRange: [0, 1],
+                outputRange: [6, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <LiveActivityIcon icon={visual.icon} color={iconColor} status={status} />
+      <View style={styles.activityBody}>
+        <View style={styles.activityPlatformRow}>
+          <View style={[styles.activityPlatformDot, { backgroundColor: iconColor }]} />
+          <Text style={styles.activityPlatform}>
+            {message.activityPlatform ?? visual.platform}
+          </Text>
+        </View>
+        <Text style={[styles.activityText, styles.autoDirection]}>
+          {message.content}
+        </Text>
+      </View>
+      <View style={styles.activityStatusIcon}>
+        {status === "working" ? (
+          <ActivityIndicator size="small" color={C.teal} />
+        ) : (
+          <Ionicons
+            name={
+              status === "failed"
+                ? "alert-circle-outline"
+                : status === "stopped"
+                  ? "stop-circle-outline"
+                  : "checkmark-circle-outline"
+            }
+            size={14}
+            color={iconColor}
+          />
+        )}
+      </View>
+      <Text style={styles.activityTime}>{formatTime(message.createdAt)}</Text>
+    </Animated.View>
+  );
+}
+
 function MessageRow({
   message,
   language,
@@ -2817,52 +2966,7 @@ function MessageRow({
       )
     )
       return null;
-    const icon: IconName =
-      activityVisual(message).icon;
-    const iconColor =
-      status === "failed"
-        ? C.danger
-        : status === "stopped"
-          ? C.muted
-          : C.teal;
-    const platform = message.activityPlatform ?? activityVisual(message).platform;
-    return (
-      <View
-        style={[
-          styles.activityRow,
-          status === "failed" && styles.activityRowFailed,
-          status === "stopped" && styles.activityRowStopped,
-        ]}
-      >
-        <View style={styles.activityIconBadge}>
-          <Ionicons name={icon} size={15} color={iconColor} />
-        </View>
-        <View style={styles.activityBody}>
-          <Text style={styles.activityPlatform}>{platform}</Text>
-          <Text style={[styles.activityText, styles.autoDirection]}>
-            {message.content}
-          </Text>
-        </View>
-        <View style={styles.activityStatusIcon}>
-          {status === "working" ? (
-            <ActivityIndicator size="small" color={C.teal} />
-          ) : (
-            <Ionicons
-              name={
-                status === "failed"
-                  ? "alert-circle-outline"
-                  : status === "stopped"
-                    ? "stop-circle-outline"
-                    : "checkmark-circle-outline"
-              }
-              size={14}
-              color={iconColor}
-            />
-          )}
-        </View>
-        <Text style={styles.activityTime}>{formatTime(message.createdAt)}</Text>
-      </View>
-    );
+    return <LiveActivityRow message={message} />;
   }
   const isUser = message.role === "user";
   return (
@@ -3544,7 +3648,35 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: C.white,
   },
+  activityIcon3d: {
+    position: "relative",
+    shadowColor: "#173E38",
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  activityIconDepth: {
+    position: "absolute",
+    width: 22,
+    height: 22,
+    top: 3,
+    left: 3,
+    borderRadius: 8,
+    opacity: 0.9,
+  },
+  activityIconFace: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: C.white,
+    borderWidth: 1.2,
+  },
   activityBody: { flex: 1, minWidth: 0 },
+  activityPlatformRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  activityPlatformDot: { width: 5, height: 5, borderRadius: 99 },
   activityPlatform: { color: C.tealDark, fontSize: 9, fontWeight: "700" },
   activityStatusIcon: { width: 16, alignItems: "center", paddingTop: 4 },
   activityRowFailed: { backgroundColor: C.dangerPale, borderColor: "#F1D2CD" },
