@@ -16,6 +16,7 @@ export type ProviderCatalog = {
   chatModels: ProviderModel[];
   transcriptionModels: ProviderModel[];
   transcriptionWarning?: string;
+  providerKind: "generic" | "cloudflare-worker";
 };
 
 export class ProviderCatalogError extends Error {
@@ -52,11 +53,35 @@ export async function discoverProviderModels(
       signal,
       baseUrl,
     );
-    return { chatModels, transcriptionModels };
+    const providerKind = chatModels.some((model) => model.id.startsWith("zoya-"))
+      ? "cloudflare-worker"
+      : "generic";
+    return {
+      chatModels,
+      transcriptionModels:
+        providerKind === "cloudflare-worker"
+          ? [
+              {
+                id: "cloudflare-auto-transcription",
+                name: "Cloudflare automatic voice transcription",
+                description: "Routes voice files to Cloudflare Whisper automatically.",
+                inputModalities: ["audio"],
+                outputModalities: ["transcription"],
+                promptPrice: null,
+                completionPrice: null,
+                contextLength: null,
+              },
+            ]
+          : transcriptionModels,
+      providerKind,
+    };
   } catch {
     return {
       chatModels,
       transcriptionModels: [],
+      providerKind: chatModels.some((model) => model.id.startsWith("zoya-"))
+        ? "cloudflare-worker"
+        : "generic",
       transcriptionWarning:
         "The chat catalog loaded, but the optional transcription-model list could not be loaded. Refresh it later.",
     };

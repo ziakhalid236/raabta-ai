@@ -32,6 +32,7 @@ import {
 
 import {
   AIRequestError,
+  requestCloudflareFileAnalysis,
   requestAudioTranscription,
   requestChatCompletion,
 } from "@/lib/ai-client";
@@ -805,6 +806,23 @@ export default function HomeScreen() {
         controller.signal,
         githubContext,
         availableTools,
+        preferences.providerKind === "cloudflare-worker"
+          ? async (attachment, prompt) => {
+              if (!attachment.uri)
+                throw new AIRequestError("This image is no longer available on the device.");
+              return requestCloudflareFileAnalysis({
+                apiKey,
+                baseUrl: preferences.providerBaseUrl,
+                file: {
+                  uri: attachment.uri,
+                  name: attachment.name,
+                  mimeType: attachment.mimeType,
+                },
+                prompt,
+                signal: controller.signal,
+              });
+            }
+          : undefined,
       );
       const answer = await requestChatCompletion({
         modelId: preferences.modelId,
@@ -988,13 +1006,21 @@ export default function HomeScreen() {
             "محفوظ storage میں API key نہیں ملی۔ Settings میں دوبارہ درج کریں۔",
           ),
         );
-      const transcript = await requestAudioTranscription({
-        modelId: preferences.transcriptionModelId,
-        apiKey,
-        file,
-        signal: controller.signal,
-        baseUrl: preferences.providerBaseUrl,
-      });
+      const transcript =
+        preferences.providerKind === "cloudflare-worker"
+          ? await requestCloudflareFileAnalysis({
+              apiKey,
+              baseUrl: preferences.providerBaseUrl,
+              file,
+              signal: controller.signal,
+            })
+          : await requestAudioTranscription({
+              modelId: preferences.transcriptionModelId,
+              apiKey,
+              file,
+              signal: controller.signal,
+              baseUrl: preferences.providerBaseUrl,
+            });
       const completedAt = new Date().toISOString();
       updateThread(currentThread.id, (thread) => ({
         ...thread,
@@ -1180,13 +1206,14 @@ export default function HomeScreen() {
       const nextPreferences = {
         ...preferences,
         providerConnected: true,
+        providerKind: catalog.providerKind,
         providerBaseUrl,
         providerKeyBaseUrl: providerBaseUrl,
         modelId: selectedChat?.id ?? "",
         modelName: selectedChat?.name ?? "",
-        modelSupportsImages: Boolean(
-          selectedChat?.inputModalities.includes("image"),
-        ),
+        modelSupportsImages:
+          catalog.providerKind === "cloudflare-worker" ||
+          Boolean(selectedChat?.inputModalities.includes("image")),
         transcriptionModelId:
           selectedVoice?.id ??
           (catalog.transcriptionWarning
@@ -1334,6 +1361,7 @@ export default function HomeScreen() {
       const nextPreferences = {
         ...preferences,
         providerConnected: false,
+        providerKind: "generic" as const,
         providerKeyBaseUrl: "",
         modelId: "",
         modelName: "",

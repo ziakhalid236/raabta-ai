@@ -284,6 +284,51 @@ export async function requestAudioTranscription(args: {
   return text;
 }
 
+/** Use a Cloudflare Worker API key to route an image or audio file to its configured model. */
+export async function requestCloudflareFileAnalysis(args: {
+  apiKey: string;
+  baseUrl: string;
+  file: { uri: string; name: string; mimeType: string; webFile?: Blob };
+  prompt?: string;
+  signal: AbortSignal;
+}): Promise<string> {
+  const form = new FormData();
+  const upload =
+    args.file.webFile !== undefined
+      ? args.file.webFile
+      : ({
+          uri: args.file.uri,
+          name: args.file.name,
+          type: args.file.mimeType,
+        } as unknown as Blob);
+  form.append("file", upload, args.file.name);
+  if (args.prompt?.trim()) form.append("prompt", args.prompt.trim().slice(0, 1200));
+  let response: Response;
+  try {
+    const origin = new URL(args.baseUrl).origin;
+    response = await fetch(`${origin}/api/files/analyze`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${args.apiKey}` },
+      body: form,
+      signal: args.signal,
+    });
+  } catch (error) {
+    if (args.signal.aborted) throw error;
+    throw new AIRequestError("Could not reach the Cloudflare file-analysis route.");
+  }
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) throw responseError(response.status);
+  const text =
+    payload &&
+    typeof payload === "object" &&
+    typeof (payload as { text?: unknown }).text === "string"
+      ? (payload as { text: string }).text.trim()
+      : "";
+  if (!text)
+    throw new AIRequestError("Cloudflare returned no readable image analysis or transcription.");
+  return text;
+}
+
 function responseError(status: number): AIRequestError {
   const messages: Record<number, string> = {
     400: "The provider could not accept this request (400). Check the model and image compatibility.",

@@ -32,6 +32,7 @@ export type ChatThread = {
 export type ChatPreferences = {
   language: "ur" | "en";
   providerConnected: boolean;
+  providerKind: "generic" | "cloudflare-worker";
   providerBaseUrl: string;
   providerKeyBaseUrl: string;
   modelId: string;
@@ -55,6 +56,7 @@ const LEGACY_PREFERENCES_KEYS = [
 export const DEFAULT_PREFERENCES: ChatPreferences = {
   language: "en",
   providerConnected: false,
+  providerKind: "generic",
   providerBaseUrl: DEFAULT_PROVIDER_BASE_URL,
   providerKeyBaseUrl: "",
   modelId: "",
@@ -126,6 +128,7 @@ export async function loadPreferences(): Promise<ChatPreferences> {
         isCurrentSchema &&
         (data.providerConnected === true) &&
         sameProviderEndpoint(providerKeyBaseUrl, providerBaseUrl),
+      providerKind: data.providerKind === "cloudflare-worker" ? "cloudflare-worker" : "generic",
       providerBaseUrl,
       providerKeyBaseUrl,
       modelId: isCurrentSchema ? stringValue(data.modelId) : "",

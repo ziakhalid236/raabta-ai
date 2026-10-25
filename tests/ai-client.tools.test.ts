@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requestChatCompletion } from "../lib/ai-client";
+import { requestChatCompletion, requestCloudflareFileAnalysis } from "../lib/ai-client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -178,5 +178,36 @@ describe("requestChatCompletion tool execution", () => {
       executeTool,
     })).rejects.toThrow("unavailable or invalid tool action");
     expect(executeTool).not.toHaveBeenCalled();
+  });
+});
+
+describe("Cloudflare Worker file analysis", () => {
+  it("sends the file and prompt to the API-key-only analysis route", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(_input)).toBe("https://worker.example/api/files/analyze");
+      expect(init?.method).toBe("POST");
+      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer worker-key");
+      const form = init?.body as FormData;
+      expect(form.get("prompt")).toBe("Read the visible text");
+      expect(form.get("file")).toBeInstanceOf(Blob);
+      return new Response(JSON.stringify({ text: "Image analysis: visible text" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestCloudflareFileAnalysis({
+      apiKey: "worker-key",
+      baseUrl: "https://worker.example/v1",
+      file: {
+        uri: "file:///photo.png",
+        name: "photo.png",
+        mimeType: "image/png",
+        webFile: new Blob(["image-bytes"], { type: "image/png" }),
+      },
+      prompt: "Read the visible text",
+      signal: new AbortController().signal,
+    })).resolves.toBe("Image analysis: visible text");
   });
 });

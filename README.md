@@ -39,9 +39,9 @@ Arbitrary shell execution, repository deletion, pull-request merging, and unmana
 
 ## Connect an AI provider
 
-1. For AI provider, create a key at your provider dashboard. For another provider, use its API key and HTTPS OpenAI-compatible base URL ending in `/v1`.
+1. For a generic provider, create a key at its provider dashboard and use its HTTPS OpenAI-compatible base URL ending in `/v1`. For the Cloudflare Worker setup, generate a project API key in the Worker control room and enter that key plus the Worker URL ending in `/v1`; Raabta does not connect to the Cloudflare account directly.
 2. Open **Settings**, enter the key and base URL, then choose **Connect & load models**. Raabta requests `/models`; it does not send a test prompt. On Android, the key is stored in SecureStore only after the catalog request succeeds.
-3. Choose a listed chat model. Use the image-capable filter only when the catalog reports image support. Speech transcription is currently cataloged through AI provider's transcription endpoint.
+3. Choose a listed chat model. With a compatible Cloudflare Worker, `zoya-auto` and the other router entries use the Worker’s configured text model, while image and voice files automatically use the Worker’s dedicated file-analysis route. The Worker currently routes image analysis to `@cf/moondream/moondream3.1-9B-A2B` and speech transcription to `@cf/openai/whisper-large-v3-turbo`; these are selected server-side, not exposed as account credentials in the app.
 4. Send a question when ready. Provider/model access, quotas and charges depend on your provider. For a self-hosted endpoint, use a reachable HTTPS server; `localhost` on a phone refers to the phone itself, not a computer running the model. Plain HTTP endpoints are rejected to protect API keys.
 
 OpenAI-compatible model lists sometimes return only model IDs; Raabta uses those IDs as their selectable names. Custom servers without a compatible `/models` endpoint are not yet supported by automatic discovery. The saved API key is bound to the successfully connected base URL: changing the URL does not forward the previous key, and you must enter the key intended for the new endpoint.
