@@ -105,8 +105,8 @@ const INTENT_STEPS: Record<AgentIntent, StepTemplate[]> = {
   github: [
     {
       kind: "github",
-      title: "List repositories and locate the target files",
-      titleUr: "repositories کی فہرست بنائیں اور مطلوبہ فائلیں تلاش کریں",
+      title: "List repositories, or create one first if none exists yet",
+      titleUr: "repositories کی فہرست بنائیں، یا اگر کوئی نہ ہو تو پہلے نیا بنائیں",
       tool: "github_list_repositories",
     },
     {
@@ -117,14 +117,26 @@ const INTENT_STEPS: Record<AgentIntent, StepTemplate[]> = {
     },
     {
       kind: "github",
+      title: "Create an isolated branch so the default branch is never written directly",
+      titleUr: "الگ branch بنائیں تاکہ default branch پر سیدھا نہ لکھا جائے",
+      tool: "github_create_branch",
+    },
+    {
+      kind: "github",
       title: "Prepare the change and ask for approval before writing",
       titleUr: "تبدیلی تیار کریں اور لکھنے سے پہلے منظوری لیں",
       tool: "github_update_file",
     },
     {
       kind: "verify",
-      title: "Confirm the commit, run or pull request from GitHub's response",
-      titleUr: "GitHub کے جواب سے commit، run یا pull request کی تصدیق کریں",
+      title: "Read the commits back to confirm the change actually landed",
+      titleUr: "commits دوبارہ پڑھ کر تصدیق کریں کہ تبدیلی واقعی محفوظ ہوئی",
+      tool: "github_list_commits",
+    },
+    {
+      kind: "verify",
+      title: "Confirm the run or pull request from GitHub's response",
+      titleUr: "GitHub کے جواب سے run یا pull request کی تصدیق کریں",
       tool: "github_get_workflow_run",
     },
   ],

@@ -61,6 +61,8 @@ export type ChatPreferences = {
   githubRepositories: string;
   /** Remembered tool approvals so the agent does not re-ask for the same action. */
   approvalPolicy: ApprovalPolicy;
+  /** Optional self-hosted SearXNG base URL used as the preferred web search provider. */
+  searxngUrl: string;
 };
 
 const THREADS_KEY = "raabta.chat.threads.v2";
@@ -91,6 +93,7 @@ export const DEFAULT_PREFERENCES: ChatPreferences = {
   githubAvatarUrl: "",
   githubRepositories: "",
   approvalPolicy: EMPTY_APPROVAL_POLICY,
+  searxngUrl: "",
 };
 
 export async function loadThreads(): Promise<ChatThread[]> {
@@ -176,6 +179,7 @@ export async function loadPreferences(): Promise<ChatPreferences> {
         ? stringValue(data.githubRepositories)
         : "",
       approvalPolicy: isCurrentSchema ? parseApprovalPolicy(data.approvalPolicy) : EMPTY_APPROVAL_POLICY,
+      searxngUrl: isCurrentSchema ? stringValue(data.searxngUrl) : "",
     };
   } catch {
     return DEFAULT_PREFERENCES;

@@ -62,6 +62,28 @@ confirms it.
   Stores tool names and statuses only; never arguments or secrets.
 - `AgentTaskController.snapshot` is a **getter**, not a method.
 
+### Self-repair loop
+
+`app/(tabs)/index.tsx` keeps `chatMessages` mutable across the dispatch. After the
+first answer, `buildRepairPrompt(report)` is fed back as a user turn and the
+model is asked again, at most `MAX_SELF_REPAIRS` (2) times. Only the final
+answer is stored in the thread, so the user sees one clean reply. Do not make
+this unbounded: every repair is a full provider round trip.
+
+### Provider retries
+
+`lib/ai-client.ts` retries only transient failures (`isTransientStatus`: 408,
+429, 5xx) and dropped connections, with exponential backoff, at most
+`MAX_PROVIDER_RETRIES` (2) extra attempts. 400/401/403/404/413 fail at once so
+the user sees the real cause. Tests in `tests/ai-client.retry.test.ts` assert
+both behaviours.
+
+### Context window
+
+`lib/provider-messages.ts` sends only the most recent `MAX_HISTORY_MESSAGES`
+(24) non-activity turns, and pushes a system note naming how many older turns
+were dropped. This prevents unbounded growth and re-uploading old images.
+
 ### Approval gotcha
 
 `checkApproval` reads the policy from `approvalPolicyRef.current`, not from
@@ -86,6 +108,26 @@ that ref in sync via the effect next to the other refs.
 - `drizzle/` and `server/` are unused Manus starter boilerplate kept only so
   the server build entry compiles. App logic lives in `lib/`, `app/`,
   `components/`.
+
+- **`Response.json()` can only be read once.** In `lib/github-tools.ts`,
+  `updateGitHubFile` parses the body before checking `response.ok`; calling a
+  helper that re-reads the body silently yields `null`. Use
+  `describeGitHubPayload(payload)` with the already-parsed object.
+- **DuckDuckGo blocks app clients.** `html.duckduckgo.com` and
+  `lite.duckduckgo.com` return HTTP 202 with a CAPTCHA interstitial for a
+  scripted user-agent, and public SearXNG instances are challenge-gated too.
+  `searchWeb` therefore runs a provider chain and detects challenge pages
+  (`isChallengePage`) instead of reporting "no results". Never assume a 200/202
+  HTML response means the search actually ran.
+- **Vision detection is a heuristic.** Most OpenAI-compatible `/models`
+  responses carry no modality metadata, so `classifyVisionModels` matches on the
+  model id/name. Keep the pattern in `lib/provider-catalog.ts` current, and use
+  `visionCandidateModels` for pickers so an unrecognised model stays selectable.
+  Do not gate sending an image on `inputModalities` alone.
+- **The GitHub token never reaches the model.** It is read from SecureStore only
+  inside the tool executor in `app/(tabs)/index.tsx`; only the login name and
+  repository list are put in the prompt. Never add the token to a prompt, an
+  error message or the Action Timeline.
 
 ## Design tokens
 

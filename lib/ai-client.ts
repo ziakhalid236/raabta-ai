@@ -17,6 +17,34 @@ const DEFAULT_CHAT_COMPLETIONS_URL = "";
 const AUDIO_TRANSCRIPTIONS_URL = "";
 const PROVIDER_REQUEST_TIMEOUT_MS = 90_000;
 
+/** Extra attempts for transient provider failures before the task fails. */
+const MAX_PROVIDER_RETRIES = 2;
+
+/** Provider statuses worth retrying: rate limits and server-side faults. */
+function isTransientStatus(status: number): boolean {
+  return status === 429 || status === 408 || status >= 500;
+}
+
+/** Wait before a retry so a busy provider is not hammered. Stops early on abort. */
+function delayForRetry(attempt: number, signal: AbortSignal): Promise<void> {
+  const waitMs = 600 * 2 ** attempt;
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("Request stopped."));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, waitMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("Request stopped."));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export class AIRequestError extends Error {
   constructor(
     message: string,
@@ -43,48 +71,73 @@ export async function requestChatCompletion(args: {
   const maxToolRounds = 8;
   let malformedToolResponses = 0;
   for (let round = 0; round < maxToolRounds; round += 1) {
-    let response: Response;
-    const requestController = new AbortController();
-    const timeoutId = setTimeout(
-      () => requestController.abort(),
-      PROVIDER_REQUEST_TIMEOUT_MS,
-    );
-    const abortRequest = () => requestController.abort();
-    args.signal.addEventListener("abort", abortRequest, { once: true });
-    try {
-      if (!/^https:\/\//i.test(chatUrl))
-        throw new AIRequestError("Configure an HTTPS OpenAI-compatible provider endpoint first.");
-      response = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${args.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: args.modelId.trim(),
-          messages,
-          ...(args.tools?.length && args.executeTool
-            ? { tools: args.tools, tool_choice: "auto" }
-            : {}),
-        }),
-        signal: requestController.signal,
-      });
-    } catch (error) {
-      if (args.signal.aborted) throw error;
-      if (error instanceof AIRequestError) throw error;
-      if (requestController.signal.aborted)
-        throw new AIRequestError(
-          "The AI provider did not respond within 90 seconds. Stop and retry, or check the provider endpoint.",
-        );
-      throw new AIRequestError(
-        "Could not reach the configured AI provider. Check the API base URL and internet connection.",
+    if (!/^https:\/\//i.test(chatUrl))
+      throw new AIRequestError("Configure an HTTPS OpenAI-compatible provider endpoint first.");
+
+    // A phone moves between networks constantly, so a single dropped request
+    // should not lose the whole task. Transient failures (no connection,
+    // rate limits, provider 5xx) are retried with backoff. Permanent ones
+    // (bad key, unknown model, oversized image) fail immediately so the user
+    // sees the real cause instead of a delay.
+    let response: Response | null = null;
+    let payload: unknown = null;
+    for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt += 1) {
+      const requestController = new AbortController();
+      const timeoutId = setTimeout(
+        () => requestController.abort(),
+        PROVIDER_REQUEST_TIMEOUT_MS,
       );
-    } finally {
-      clearTimeout(timeoutId);
-      args.signal.removeEventListener("abort", abortRequest);
+      const abortRequest = () => requestController.abort();
+      args.signal.addEventListener("abort", abortRequest, { once: true });
+      try {
+        const attemptResponse = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${args.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: args.modelId.trim(),
+            messages,
+            ...(args.tools?.length && args.executeTool
+              ? { tools: args.tools, tool_choice: "auto" }
+              : {}),
+          }),
+          signal: requestController.signal,
+        });
+        if (!attemptResponse.ok && isTransientStatus(attemptResponse.status) && attempt < MAX_PROVIDER_RETRIES) {
+          clearTimeout(timeoutId);
+          args.signal.removeEventListener("abort", abortRequest);
+          await delayForRetry(attempt, args.signal);
+          continue;
+        }
+        response = attemptResponse;
+        payload = await attemptResponse.json().catch(() => null);
+        break;
+      } catch (error) {
+        if (args.signal.aborted) throw error;
+        if (error instanceof AIRequestError) throw error;
+        const timedOut = requestController.signal.aborted;
+        if (attempt < MAX_PROVIDER_RETRIES) {
+          clearTimeout(timeoutId);
+          args.signal.removeEventListener("abort", abortRequest);
+          await delayForRetry(attempt, args.signal);
+          continue;
+        }
+        if (timedOut)
+          throw new AIRequestError(
+            "The AI provider did not respond within 90 seconds. Stop and retry, or check the provider endpoint.",
+          );
+        throw new AIRequestError(
+          "Could not reach the configured AI provider. Check the API base URL and internet connection.",
+        );
+      } finally {
+        clearTimeout(timeoutId);
+        args.signal.removeEventListener("abort", abortRequest);
+      }
     }
 
-    const payload: unknown = await response.json().catch(() => null);
+    if (!response) throw new AIRequestError("The AI provider did not respond. Try again.");
     if (!response.ok) throw responseError(response.status);
     const choices =
       payload && typeof payload === "object"
