@@ -15,6 +15,7 @@ export type ChatToolCallExecutor = (
 
 const DEFAULT_CHAT_COMPLETIONS_URL = "";
 const AUDIO_TRANSCRIPTIONS_URL = "";
+const PROVIDER_REQUEST_TIMEOUT_MS = 90_000;
 
 export class AIRequestError extends Error {
   constructor(
@@ -43,6 +44,13 @@ export async function requestChatCompletion(args: {
   let malformedToolResponses = 0;
   for (let round = 0; round < maxToolRounds; round += 1) {
     let response: Response;
+    const requestController = new AbortController();
+    const timeoutId = setTimeout(
+      () => requestController.abort(),
+      PROVIDER_REQUEST_TIMEOUT_MS,
+    );
+    const abortRequest = () => requestController.abort();
+    args.signal.addEventListener("abort", abortRequest, { once: true });
     try {
       if (!/^https:\/\//i.test(chatUrl))
         throw new AIRequestError("Configure an HTTPS OpenAI-compatible provider endpoint first.");
@@ -59,13 +67,21 @@ export async function requestChatCompletion(args: {
             ? { tools: args.tools, tool_choice: "auto" }
             : {}),
         }),
-        signal: args.signal,
+        signal: requestController.signal,
       });
     } catch (error) {
       if (args.signal.aborted) throw error;
+      if (error instanceof AIRequestError) throw error;
+      if (requestController.signal.aborted)
+        throw new AIRequestError(
+          "The AI provider did not respond within 90 seconds. Stop and retry, or check the provider endpoint.",
+        );
       throw new AIRequestError(
         "Could not reach the configured AI provider. Check the API base URL and internet connection.",
       );
+    } finally {
+      clearTimeout(timeoutId);
+      args.signal.removeEventListener("abort", abortRequest);
     }
 
     const payload: unknown = await response.json().catch(() => null);

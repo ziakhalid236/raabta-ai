@@ -41,6 +41,7 @@ import { getLiveToolDefinitions } from "@/lib/ai-tools";
 import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
 import {
   deleteAIWorkspaceFile,
+  findAIWorkspaceText,
   getAIWorkspaceUsage,
   listAIWorkspaceFiles,
   readAIWorkspaceFile,
@@ -196,7 +197,7 @@ export default function HomeScreen() {
     null,
   );
   const [modelPickerKind, setModelPickerKind] = useState<
-    "chat" | "transcription" | null
+    "chat" | "vision" | "transcription" | null
   >(null);
   const [accountsVisible, setAccountsVisible] = useState(false);
   const [githubProfile, setGithubProfile] = useState<GitHubProfile | null>(
@@ -513,6 +514,11 @@ export default function HomeScreen() {
               "inspect one workflow run",
             ],
             unavailableActions: ["delete repositories", "merge pull requests", "arbitrary shell execution"],
+            operatingContract: [
+              "Never claim a file was uploaded, pushed, built, or deployed without a successful tool result containing a URL, SHA, run ID, or other returned evidence.",
+              "After an approved file write, read the target file or inspect the returned commit before reporting completion; for CI work, inspect the workflow run and conclusion.",
+              "If a requested terminal command, background task, or deployment is unavailable, say so explicitly and provide the safest available GitHub Actions or browser link instead of pretending it ran.",
+            ],
           })
         : "";
       const executeToolAction = async (
@@ -537,6 +543,13 @@ export default function HomeScreen() {
             ),
             ...(await getAIWorkspaceUsage()),
           });
+        if (name === "ai_workspace_find_text")
+          return JSON.stringify(
+            await findAIWorkspaceText(
+              String(args.query ?? ""),
+              typeof args.directory === "string" ? args.directory : "",
+            ),
+          );
         if (name === "ai_workspace_read_file")
           return JSON.stringify({
             path: String(args.path ?? ""),
@@ -694,6 +707,7 @@ export default function HomeScreen() {
           web_search: ["Searching the public web", "عوامی ویب پر تلاش جاری ہے"],
           read_public_web_page: ["Reading a public web page", "عوامی ویب صفحہ پڑھا جا رہا ہے"],
           ai_workspace_list_files: ["Listing files in the private AI workspace", "نجی AI workspace کی فائلیں دیکھی جا رہی ہیں"],
+          ai_workspace_find_text: ["Searching workspace text", "workspace کے متن میں تلاش جاری ہے"],
           ai_workspace_read_file: ["Reading a private workspace file", "نجی workspace فائل پڑھی جا رہی ہے"],
           ai_workspace_write_file: ["Writing a private workspace file", "نجی workspace فائل لکھی جا رہی ہے"],
           ai_workspace_delete_file: ["Preparing to delete a private workspace file", "نجی workspace فائل حذف کرنے کی تیاری"],
@@ -883,6 +897,13 @@ export default function HomeScreen() {
               });
             }
           : undefined,
+      );
+      addActivity(
+        t(
+          "Waiting for the provider response. You can stop this task at any time.",
+          "provider کے جواب کا انتظار ہے۔ آپ کسی بھی وقت یہ task روک سکتے ہیں۔",
+        ),
+        { activityKind: "model", activityPlatform: "AI provider" },
       );
       const answer = await requestChatCompletion({
         modelId: selectedTaskModelId,
@@ -1334,6 +1355,21 @@ export default function HomeScreen() {
       await savePreferences(nextPreferences);
     } catch {
       setSettingsNotice("The selected model could not be saved locally.");
+    }
+  }
+
+  async function selectVisionModel(model: ProviderModel) {
+    const nextPreferences = {
+      ...preferences,
+      visionModelId: model.id,
+      visionModelName: model.name,
+    };
+    setPreferences(nextPreferences);
+    setModelPickerKind(null);
+    try {
+      await savePreferences(nextPreferences);
+    } catch {
+      setSettingsNotice("The selected image model could not be saved locally.");
     }
   }
 
@@ -2436,6 +2472,36 @@ export default function HomeScreen() {
                   )}
             </Text>
           ) : null}
+          <Pressable
+            onPress={() => {
+              if (!providerConnected || !modelCatalog) {
+                setSettingsNotice(
+                  t(
+                    "Connect or refresh the provider catalog first so Raabta can detect image models.",
+                    "امیج ماڈلز detect کرنے کے لیے پہلے provider catalog connect یا refresh کریں۔",
+                  ),
+                );
+                return;
+              }
+              setModelPickerKind("vision");
+            }}
+            style={[styles.researchCard, { flexDirection: "row", alignItems: "center" }]}
+          >
+            <View style={styles.setupIcon}>
+              <Ionicons name="image-outline" size={17} color={C.teal} />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.setupTitle}>
+                {preferences.visionModelName || t("Choose an image model", "امیج ماڈل منتخب کریں")}
+              </Text>
+              <Text style={styles.setupSubtitle}>
+                {modelCatalog?.visionModels.length
+                  ? t(`${modelCatalog.visionModels.length} image-capable model(s) detected`, `${modelCatalog.visionModels.length} image-capable ماڈل ملے`)
+                  : t("No image model reported yet · refresh catalog", "ابھی image model نہیں ملا · catalog refresh کریں")}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={17} color={C.muted} />
+          </Pressable>
           {preferences.modelId ? (
             <View style={styles.routingCard}>
               <View style={styles.routingHeader}>
@@ -2616,12 +2682,16 @@ export default function HomeScreen() {
         models={
           modelPickerKind === "transcription"
             ? (modelCatalog?.transcriptionModels ?? [])
-            : (modelCatalog?.chatModels ?? [])
+            : modelPickerKind === "vision"
+              ? (modelCatalog?.visionModels ?? [])
+              : (modelCatalog?.chatModels ?? [])
         }
         selectedModelId={
           modelPickerKind === "transcription"
             ? preferences.transcriptionModelId
-            : preferences.modelId
+            : modelPickerKind === "vision"
+              ? preferences.visionModelId
+              : preferences.modelId
         }
         loading={isTestingConnection}
         message={
@@ -2634,6 +2704,8 @@ export default function HomeScreen() {
         onSelect={(model) => {
           if (modelPickerKind === "transcription")
             void selectTranscriptionModel(model);
+          else if (modelPickerKind === "vision")
+            void selectVisionModel(model);
           else void selectChatModel(model);
         }}
       />

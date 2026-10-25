@@ -25,7 +25,7 @@ const C = {
   line: "#E7E9E4",
 };
 
-type ModelKind = "chat" | "transcription";
+type ModelKind = "chat" | "vision" | "transcription";
 
 export function ModelPicker({
   visible,
@@ -66,10 +66,16 @@ export function ModelPicker({
     });
   }, [kind, models, query, visionOnly]);
 
-  const title = kind === "chat" ? t("Choose a chat model", "چیٹ ماڈل منتخب کریں") : t("Choose a voice model", "آواز کا ماڈل منتخب کریں");
+  const title = kind === "chat"
+    ? t("Choose a chat model", "چیٹ ماڈل منتخب کریں")
+    : kind === "vision"
+      ? t("Choose an image model", "امیج ماڈل منتخب کریں")
+      : t("Choose a voice model", "آواز کا ماڈل منتخب کریں");
   const subtitle = kind === "chat"
     ? t("Names and capabilities from your loaded provider catalog", "آپ کے provider کی فہرست سے ماڈل نام اور صلاحیتیں")
-    : t("Models returned for AI provider speech transcription", "AI provider سے دستیاب آواز کی transcription کے ماڈلز");
+    : kind === "vision"
+      ? t("Only models reported or detected as image-capable are shown", "صرف image-capable ماڈلز دکھائے جا رہے ہیں")
+      : t("Models returned for AI provider speech transcription", "AI provider سے دستیاب آواز کی transcription کے ماڈلز");
 
   return (
     <Modal
@@ -154,7 +160,7 @@ export function ModelPicker({
                     {selected ? <Ionicons name="checkmark-circle" size={21} color={C.teal} /> : <Ionicons name="ellipse-outline" size={20} color="#B6C0BB" />}
                   </View>
                   <View style={styles.badges}>
-                    {kind === "chat" && canSeeImages ? <Text style={styles.badge}>VISION</Text> : null}
+                    {(kind === "chat" || kind === "vision") && canSeeImages ? <Text style={styles.badge}>VISION</Text> : null}
                     {kind === "chat" && item.inputModalities.includes("audio") ? <Text style={styles.badge}>AUDIO INPUT</Text> : null}
                     {item.promptPrice === 0 && item.completionPrice === 0 ? <Text style={styles.freeBadge}>FREE</Text> : null}
                     {item.contextLength ? <Text style={styles.context}>{formatContext(item.contextLength)} context</Text> : null}

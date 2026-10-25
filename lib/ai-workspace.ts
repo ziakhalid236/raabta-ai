@@ -51,6 +51,32 @@ export async function listAIWorkspaceFiles(directory = ""): Promise<string[]> {
   return result.sort((a, b) => a.localeCompare(b));
 }
 
+export async function findAIWorkspaceText(
+  query: string,
+  directory = "",
+): Promise<{ matches: Array<{ path: string; line: number; text: string }>; truncated: boolean }> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) throw new AIWorkspaceError("Enter text to search for in the AI workspace.");
+  const files = await listAIWorkspaceFiles(directory);
+  const matches: Array<{ path: string; line: number; text: string }> = [];
+  let truncated = false;
+  for (const entry of files) {
+    if (entry.endsWith("/")) {
+      const nested = await findAIWorkspaceText(query, entry.slice(0, -1));
+      matches.push(...nested.matches.slice(0, Math.max(0, 100 - matches.length)));
+      truncated ||= nested.truncated || matches.length >= 100;
+      continue;
+    }
+    const content = await readAIWorkspaceFile(entry);
+    content.split(/\r?\n/).forEach((line, index) => {
+      if (!line.toLowerCase().includes(needle)) return;
+      if (matches.length < 100) matches.push({ path: entry, line: index + 1, text: line.slice(0, 500) });
+      else truncated = true;
+    });
+  }
+  return { matches, truncated };
+}
+
 export async function readAIWorkspaceFile(relativePath: string): Promise<string> {
   const path = pathInWorkspace(relativePath);
   const info = await FileSystem.getInfoAsync(path);

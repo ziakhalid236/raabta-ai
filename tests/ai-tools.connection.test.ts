@@ -9,6 +9,8 @@ describe("connection-aware live tools", () => {
     expect(names.some((name) => name.startsWith("github_"))).toBe(false);
     expect(names).toContain("web_search");
     expect(names).toContain("ai_workspace_read_file");
+    expect(names).toContain("ai_workspace_find_text");
+    expect(names).not.toContain("run_shell_command");
   });
 
   it("exposes the supported GitHub read and approval-gated write tools when connected", () => {

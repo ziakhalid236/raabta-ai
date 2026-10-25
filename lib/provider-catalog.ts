@@ -104,6 +104,8 @@ async function fetchModelCollection(
   if (!normalizedBase)
     throw new ProviderCatalogError("Enter the HTTPS OpenAI-compatible /v1 base URL first.");
   const initial = new URL(`${normalizedBase}/models`);
+  if (outputModality === "transcription")
+    initial.searchParams.set("output_modalities", "transcription");
   if (initial.protocol !== "https:") {
     throw new ProviderCatalogError(
       "Use an HTTPS API base URL so the provider key is not sent in plain text.",
@@ -197,9 +199,19 @@ function normalizeModel(value: unknown): ProviderModel | null {
   const name = reportedName || id;
 
   const architecture = asRecord(model?.architecture);
-  const inputModalities = stringArray(
-    architecture?.input_modalities ?? model.input_modalities,
-  );
+  const capability = asRecord(model.capabilities);
+  const reportedInputModalities =
+    architecture?.input_modalities ??
+    model.input_modalities ??
+    model.input_modalities_supported ??
+    model.modalities;
+  const inputModalities = stringArray(reportedInputModalities);
+  if (
+    (capability?.vision === true || model.vision === true || model.supports_vision === true) &&
+    !inputModalities.includes("image")
+  ) {
+    inputModalities.push("image");
+  }
   const outputModalities = stringArray(
     architecture?.output_modalities ?? model.output_modalities,
   );
@@ -230,7 +242,10 @@ function finitePrice(value: unknown): number | null {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
+    ? value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
     : [];
 }
 
@@ -239,7 +254,9 @@ export function classifyVisionModels(models: ProviderModel[]): ProviderModel[] {
     (model) =>
       model.inputModalities.some((modality) =>
         /image|vision|multimodal/i.test(modality),
-      ) || /vision|multimodal|vl|image/i.test(`${model.id} ${model.name} ${model.description}`),
+      ) || /vision|multimodal|\bvl\b|image|llava|pixtral|internvl|moondream|minicpm-v|gemma-3|gpt-4o|claude-3|glm-4v|qwen.*-vl|llama.*vision/i.test(
+        `${model.id} ${model.name} ${model.description}`,
+      ),
   );
 }
 

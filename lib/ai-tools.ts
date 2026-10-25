@@ -60,6 +60,23 @@ const BASE_TOOLS: AiToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "ai_workspace_find_text",
+      description:
+        "Search text inside files in Raabta's private, size-limited AI workspace. Returns bounded file paths, line numbers and matching excerpts; it cannot access the phone's other files or run shell commands.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: string("Text to find"),
+          directory: string("Optional relative workspace folder"),
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "ai_workspace_read_file",
       description:
         "Read a text file only from the private Raabta AI workspace on this device.",
