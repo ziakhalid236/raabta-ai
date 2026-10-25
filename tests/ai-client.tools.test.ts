@@ -113,6 +113,47 @@ describe("requestChatCompletion tool execution", () => {
     expect(calls).toBe(2);
   });
 
+  it("repairs one malformed tool envelope and tolerates surrounding text and JSON fences", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      if (calls === 2) {
+        expect(body.messages.some((message) =>
+          message.role === "user" && message.content.includes("last tool request was malformed"),
+        )).toBe(true);
+      }
+      const content = calls === 1
+        ? '[[RAABTA_TOOL_CALL]]{"name":"lookup","arguments":{}}[[/RAABTA_TOOL_CALL]]'
+        : calls === 2
+          ? 'I will check it now:\n[[RAABTA_TOOL_CALL]]```json\n{"name":"lookup","arguments":{"query":"raabta-ai"}}\n```[[/RAABTA_TOOL_CALL]]\nOne moment.'
+          : "The repository lookup is complete.";
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const executeTool = vi.fn(async () => "Repository metadata returned");
+
+    const answer = await requestChatCompletion({
+      modelId: "test-model",
+      apiKey: "test-key",
+      messages: [{ role: "user", content: "Read the repository" }],
+      signal: new AbortController().signal,
+      baseUrl: "https://api.example.test/v1",
+      tools: [lookupTool],
+      executeTool,
+    });
+
+    expect(answer).toBe("The repository lookup is complete.");
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith("lookup", { query: "raabta-ai" });
+    expect(calls).toBe(3);
+  });
+
   it("does not execute text envelopes for tools that were not supplied", async () => {
     vi.stubGlobal(
       "fetch",

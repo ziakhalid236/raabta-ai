@@ -42,6 +42,7 @@ export async function requestChatCompletion(args: {
   const messages = [...args.messages] as Array<Record<string, unknown>>;
   const completedToolActions = new Map<string, string>();
   const maxToolRounds = 8;
+  let malformedToolResponses = 0;
   for (let round = 0; round < maxToolRounds; round += 1) {
     let response: Response;
     try {
@@ -136,7 +137,20 @@ export async function requestChatCompletion(args: {
       continue;
     }
     if (assistantContent && args.executeTool && args.tools?.length) {
-      const textToolCall = parseTextToolCall(assistantContent, args.tools);
+      let textToolCall: TextToolCall | null;
+      try {
+        textToolCall = parseTextToolCall(assistantContent, args.tools);
+      } catch (error) {
+        malformedToolResponses += 1;
+        if (malformedToolResponses >= 2) throw error;
+        messages.push({ role: "assistant", content: assistantContent });
+        messages.push({
+          role: "user",
+          content:
+            "No tool action was run because your last tool request was malformed. Please retry once using exactly one valid JSON object inside [[RAABTA_TOOL_CALL]]...[[/RAABTA_TOOL_CALL]], with no code fence around the JSON. Use a tool name and arguments exactly as listed in the system message. If you cannot form a valid call, answer normally and explain what information is missing.",
+        });
+        continue;
+      }
       if (textToolCall) {
         const signature = `${textToolCall.name}:${JSON.stringify(textToolCall.arguments)}`;
         const earlierResult = completedToolActions.get(signature);
@@ -308,16 +322,21 @@ function parseTextToolCall(
   const marker = "[[RAABTA_TOOL_CALL]]";
   const closing = "[[/RAABTA_TOOL_CALL]]";
   if (!content.includes(marker) && !content.includes(closing)) return null;
-  const match = /^\[\[RAABTA_TOOL_CALL\]\](\{[\s\S]*\})\[\[\/RAABTA_TOOL_CALL\]\]$/.exec(
-    content.trim(),
-  );
-  if (!match)
+  const start = content.indexOf(marker);
+  const end = content.indexOf(closing, start + marker.length);
+  if (start < 0 || end < 0 || content.indexOf(marker, start + marker.length) >= 0)
     throw new AIRequestError(
       "The provider returned a malformed Raabta tool request. No action was run; try again or choose a tool-compatible model.",
     );
+  let payload = content.slice(start + marker.length, end).trim();
+  payload = payload
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .replace(/^json\s*/i, "")
+    .trim();
   let value: unknown;
   try {
-    value = JSON.parse(match[1]);
+    value = JSON.parse(payload);
   } catch {
     throw new AIRequestError(
       "The provider returned invalid JSON for a tool request. No action was run.",
