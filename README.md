@@ -10,12 +10,14 @@ Connect an API key and an OpenAI-compatible `/v1` base URL (AI provider is the d
 
 Start, reopen and resume locally stored conversations, stop an in-flight request, and see real preparation, retrieval, model dispatch, answer, failure and stop events in the persistent Action Timeline. Without a connected key/model or after an API error, Raabta shows an honest setup/error state rather than inventing an answer.
 
+The provider is not locked to Cloudflare. Any HTTPS endpoint that exposes the documented OpenAI-compatible routes can be used, including compatible gateways for OpenAI, Gemini, Claude, Grok, self-hosted models and other vendors. Raabta reads model metadata and automatically routes each task to a discovered capability: text chat, coding, image input or transcription. The user chooses a primary chat model rather than separate hidden models for every task. If a provider rejects a model or does not expose a required capability, the chat and Action Timeline explain the limitation and list discovered alternatives instead of showing only a generic error.
+
 ### Stage 2 — Selected research and media
 
 - Search public web results through an open-source SearXNG instance first, with DuckDuckGo HTML as a fallback, then follow up to three public result pages for bounded extraction. If a page blocks reading, its real URL remains attached as a clearly marked snippet source; search errors return no invented citations.
 - Enter a public HTTPS URL to read a bounded excerpt from supported HTML, text, JSON or XML, save a `.txt` rendition in app-private documents and ask your selected model about it. Pages over 4 MB are rejected; the model receives at most 35,000 extracted characters. Login-required sites, PDF/binary extraction and private account browsing are not supported.
-- Choose up to four combined image/document attachments from the gallery or system file picker. Compact image thumbnails can be opened full-size. Settings exposes a separate detected **image model** picker; provider modality flags are normalized across common OpenAI-compatible catalog shapes and known multimodal model families. Unsupported image requests are blocked before network dispatch. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters.
-- Record a voice message after granting microphone permission, or select an audio file. Choose an optional transcription model discovered from AI provider's transcription catalog; it uses the same AI provider key. Audio uploads are limited to 20 MB. The transcript returns to the composer for review and is never sent automatically.
+- Choose up to four combined image/document attachments from the gallery or system file picker. Compact image thumbnails can be opened full-size. Provider modality flags are normalized across common OpenAI-compatible catalog shapes and known multimodal model families; image-capable models are selected automatically when an image is attached. Unsupported image requests are blocked before network dispatch. Images are limited to 6 MB each and local text documents to 2 MB / 80,000 characters.
+- Record a voice message after granting microphone permission, or select an audio file. The app automatically chooses a model discovered in the provider's transcription catalog using the same AI provider key. Audio uploads are limited to 20 MB. The transcript returns to the composer for review and is never sent automatically.
 - Assistant answers render as GitHub-flavored Markdown with branded headings, lists, tables and code. Safe HTTPS links can be opened from an answer.
 
 ### Stage 3 — Bounded assistant tasks
@@ -37,6 +39,10 @@ Raabta runs as an agent rather than a single-shot assistant. Every user request 
 - The chat screen builds the plan before dispatch, streams plan/tool events into the task controller, and renders a collapsible plan card above the conversation showing progress, the current step and the tool action log.
 
 A verification step always runs before the final answer, so the model is instructed to check that its own tool results actually satisfy the request. Plans stay truthful: only steps backed by a real tool result are marked done.
+
+### Safe self-improvement diagnostics
+
+Provider failures, capability mismatches, tool failures and verification problems are recorded as bounded local diagnostics. On a later failure Raabta classifies the issue and provides a concrete repair suggestion, such as refreshing the catalog, using an advertised capability or retrying an approved tool. This is deliberately not silent self-modifying source code: the mobile app has no arbitrary shell, package installer or background code runner, so it never claims to train or rewrite itself without an explicit, reviewable development action.
 
 ### Approvals that do not nag
 

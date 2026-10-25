@@ -79,6 +79,11 @@ import {
   type VerificationReport,
 } from "@/lib/agent/verifier";
 import {
+  buildIssueRepairSuggestion,
+  makeAgentIssue,
+  recordAgentIssue,
+} from "@/lib/agent/self-improvement";
+import {
   ApprovalSheet,
   type ApprovalRequest,
 } from "@/components/raabta/approval-sheet";
@@ -110,6 +115,10 @@ import {
   type ProviderCatalog,
   type ProviderModel,
 } from "@/lib/provider-catalog";
+import {
+  capabilityFailureMessage,
+  chooseModelForTask,
+} from "@/lib/provider-routing";
 import { fetchGitHubProfile, type GitHubProfile } from "@/lib/github-account";
 import {
   createGitHubBranch,
@@ -484,32 +493,31 @@ export default function HomeScreen() {
     ) {
       setShowError(
         t(
-          "Connect an AI provider and choose a chat model in Settings before sending.",
-          "بھیجنے سے پہلے Settings میں AI provider جوڑیں اور chat model منتخب کریں۔",
+          "Connect an AI provider and load at least one chat model before sending.",
+          "بھیجنے سے پہلے AI provider جوڑیں اور کم از کم ایک chat model لوڈ کریں۔",
         ),
       );
       setPanel("settings");
       return;
     }
-    if (
-      attachments.some((attachment) => attachment.kind === "image") &&
-      !preferences.modelSupportsImages &&
-      !preferences.visionModelId
-    ) {
-      setShowError(
-        t(
-          "This chat model does not list image input. Choose an image-capable model before sending your photo.",
-          "اس chat model میں image input درج نہیں۔ تصویر بھیجنے سے پہلے image-capable model منتخب کریں۔",
-        ),
+    const routing = chooseModelForTask({
+      catalog: modelCatalog,
+      preferences,
+      text,
+      attachments,
+    });
+    if (!routing.model) {
+      const message = t(
+        `No model with the required ${routing.capability} capability was discovered. Refresh the provider catalog or connect another OpenAI-compatible endpoint.`,
+        `ضروری ${routing.capability} صلاحیت والا کوئی model نہیں ملا۔ provider catalog تازہ کریں یا دوسرا OpenAI-compatible endpoint جوڑیں۔`,
       );
-      setModelPickerKind("chat");
+      setShowError(message);
+      setPanel("settings");
+      void recordAgentIssue(makeAgentIssue(message, routing.capability));
       return;
     }
-
-    const chatDisplayName =
-      preferences.modelName.trim() ||
-      t("your selected model", "آپ کا منتخب ماڈل");
-    const selectedTaskModelId = selectTaskModel(preferences, text, attachments);
+    const selectedTaskModelId = routing.model.id;
+    const chatDisplayName = routing.model.name;
     let currentThread = activeThread;
     if (!currentThread) {
       currentThread = createThread();
@@ -1095,8 +1103,8 @@ export default function HomeScreen() {
         throw new Error("Request stopped before sending.");
       addActivity(
         t(
-          `Selected the task model: ${preferences.modelName || "the configured model"}`,
-          `اس task کے لیے model منتخب کیا گیا: ${preferences.modelName || "configured model"}`,
+          routing.reason,
+          `${routing.reason} یہ انتخاب خودکار ہے۔`,
         ),
         { activityKind: "model", activityPlatform: "AI provider" },
       );
@@ -1226,11 +1234,22 @@ export default function HomeScreen() {
     } catch (error) {
       const stopped = controller.signal.aborted;
       const safeError = safeTaskError(error);
+      const issue = makeAgentIssue(safeError, text || "agent task");
+      const improvement = buildIssueRepairSuggestion(issue);
+      const routedError = stopped
+        ? safeError
+        : capabilityFailureMessage({
+            capability: routing.capability,
+            failedModel: routing.model,
+            alternatives: routing.alternatives,
+            error: safeError,
+          });
+      void recordAgentIssue(issue);
       taskController.finish(stopped ? "stopped" : "failed");
       updateActivity(
         stopped
           ? t("Request stopped by you.", "آپ نے درخواست روک دی۔")
-          : `${t("Task failed", "کام مکمل نہیں ہوا")}: ${safeError}`,
+          : `${t("Task failed", "کام مکمل نہیں ہوا")}: ${routedError} ${improvement}`,
         stopped ? "stopped" : "failed",
       );
       setShowError(
@@ -1239,7 +1258,7 @@ export default function HomeScreen() {
               "Task stopped. Your question and action history remain saved on this device.",
               "کام روک دیا گیا۔ سوال اور actions کی تاریخ اسی فون پر محفوظ ہے۔",
             )
-          : safeError,
+          : `${routedError} ${improvement}`,
       );
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
@@ -1313,19 +1332,25 @@ export default function HomeScreen() {
   }
 
   async function transcribeAudioFile(file: LocalAudioFile) {
+    const voiceRouting = chooseModelForTask({
+      catalog: modelCatalog,
+      preferences,
+      text: "voice transcription",
+      capability: "transcription",
+    });
     if (
       !providerConnected ||
       !sameProviderEndpoint(
         preferences.providerKeyBaseUrl,
         preferences.providerBaseUrl,
       ) ||
-      !preferences.transcriptionModelId ||
-      !hasKey
+      !hasKey ||
+      (!voiceRouting.model && preferences.providerKind !== "cloudflare-worker")
     ) {
       setShowError(
         t(
-          "Connect AI provider and choose a transcription model in Settings before using voice input.",
-          "آواز استعمال کرنے سے پہلے Settings میں AI provider جوڑیں اور transcription model منتخب کریں۔",
+          "Connect an AI provider that advertises a transcription model before using voice input. Refresh the catalog or choose another endpoint.",
+          "آواز استعمال کرنے سے پہلے ایسا AI provider جوڑیں جو transcription model دکھاتا ہو۔ catalog تازہ کریں یا دوسرا endpoint منتخب کریں۔",
         ),
       );
       setPanel("settings");
@@ -1338,8 +1363,8 @@ export default function HomeScreen() {
       return;
     }
     const transcriptionDisplayName =
-      preferences.transcriptionModelName.trim() ||
-      t("the selected transcription model", "منتخب transcription ماڈل");
+      voiceRouting.model?.name ||
+      t("the provider's automatic transcription route", "provider کا خودکار transcription route");
     let currentThread = activeThread;
     if (!currentThread) {
       currentThread = createThread();
@@ -1398,7 +1423,7 @@ export default function HomeScreen() {
               signal: controller.signal,
             })
           : await requestAudioTranscription({
-              modelId: preferences.transcriptionModelId,
+              modelId: voiceRouting.model?.id ?? "",
               apiKey,
               file,
               signal: controller.signal,
@@ -1440,6 +1465,16 @@ export default function HomeScreen() {
     } catch (error) {
       const stopped = controller.signal.aborted;
       const safeError = safeTaskError(error);
+      const issue = makeAgentIssue(safeError, "voice transcription");
+      const routedError = stopped
+        ? safeError
+        : capabilityFailureMessage({
+            capability: "transcription",
+            failedModel: voiceRouting.model,
+            alternatives: voiceRouting.alternatives,
+            error: safeError,
+          });
+      void recordAgentIssue(issue);
       updateThread(currentThread.id, (thread) => ({
         ...thread,
         messages: thread.messages.map((message) =>
@@ -1451,13 +1486,13 @@ export default function HomeScreen() {
                       "Voice transcription stopped by you.",
                       "آپ نے آواز کا transcription روک دیا۔",
                     )
-                  : `${t("Voice transcription failed", "آواز کا transcript نہیں بن سکا")}: ${safeError}`,
+                  : `${t("Voice transcription failed", "آواز کا transcript نہیں بن سکا")}: ${routedError}`,
                 activityStatus: stopped ? "stopped" : "failed",
               }
             : message,
         ),
       }));
-      setShowError(safeError);
+      setShowError(routedError);
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
       setIsTranscribing(false);
@@ -2911,8 +2946,8 @@ export default function HomeScreen() {
           <FieldLabel
             title={t("Chat model", "چیٹ ماڈل")}
             subtitle={t(
-              "Choose a model by its name from the connected catalog.",
-              "منسلک فہرست سے نام کے ذریعے ماڈل منتخب کریں۔",
+              "Choose the primary model once; Raabta automatically routes image, coding, research and voice tasks using the catalog.",
+              "بنیادی model ایک بار منتخب کریں؛ رابطہ catalog کے مطابق image، coding، research اور voice کام خود route کرے گا۔",
             )}
           />
           <Pressable
@@ -2969,8 +3004,8 @@ export default function HomeScreen() {
                     "Image input دستیاب · تصاویر بھیج سکتے ہیں",
                   )
                 : t(
-                    "Text chat model · choose an image-capable model to ask about photos",
-                    "Text model · تصاویر کے لیے image-capable model منتخب کریں",
+                    "Text chat model · image tasks are routed automatically when a vision model is available",
+                    "Text model · vision model دستیاب ہو تو image کام خود route ہوں گے",
                   )}
             </Text>
           ) : null}
@@ -2979,13 +3014,18 @@ export default function HomeScreen() {
               if (!providerConnected || !modelCatalog) {
                 setSettingsNotice(
                   t(
-                    "Connect or refresh the provider catalog first so Raabta can detect image models.",
-                    "امیج ماڈلز detect کرنے کے لیے پہلے provider catalog connect یا refresh کریں۔",
+                    "Connect or refresh the provider catalog so Raabta can detect image models automatically.",
+                    "رابطہ image models خود detect کرنے کے لیے provider catalog connect یا refresh کریں۔",
                   ),
                 );
                 return;
               }
-              setModelPickerKind("vision");
+              setSettingsNotice(
+                t(
+                  "Image models are selected automatically from the provider capability catalog.",
+                  "Image models provider capability catalog سے خود منتخب ہوتے ہیں۔",
+                ),
+              );
             }}
             style={[
               styles.researchCard,
@@ -3045,10 +3085,10 @@ export default function HomeScreen() {
           ) : null}
 
           <FieldLabel
-            title={t("Voice transcription · optional", "آواز کا متن · اختیاری")}
+            title={t("Voice transcription · automatic", "آواز کا متن · خودکار")}
             subtitle={t(
-              "Uses the same AI provider key, with a model listed for transcription.",
-              "اسی AI provider key سے transcription کے لیے درج ماڈل استعمال ہوتا ہے۔",
+              "The same provider key is used; the app chooses a discovered transcription model when you record or attach audio.",
+              "اسی provider key سے audio کے وقت دستیاب transcription model خود منتخب ہوتا ہے۔",
             )}
           />
           <Pressable
@@ -3069,8 +3109,12 @@ export default function HomeScreen() {
                 );
                 return;
               }
-              setModelPickerKind("transcription");
-              if (!modelCatalog) void connectProvider();
+              setSettingsNotice(
+                t(
+                  "Voice models are selected automatically from the provider capability catalog.",
+                  "Voice models provider capability catalog سے خود منتخب ہوتے ہیں۔",
+                ),
+              );
             }}
             style={[
               styles.researchCard,
@@ -3095,8 +3139,8 @@ export default function HomeScreen() {
                       "transcription فہرست سے منتخب",
                     )
                   : t(
-                      "Voice stays optional until selected",
-                      "ماڈل منتخب ہونے تک آواز بند رہے گی",
+                    "Automatically selected when voice is used",
+                    "آواز استعمال ہونے پر خود منتخب ہوگا",
                     )}
               </Text>
             </View>
@@ -3438,26 +3482,6 @@ function shouldAutoResearch(text: string): boolean {
   return /(?:\b(?:latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather)\b)|(?:قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)/i.test(
     text,
   );
-}
-
-function selectTaskModel(
-  preferences: ChatPreferences,
-  text: string,
-  attachments: ChatAttachment[],
-): string {
-  if (
-    attachments.some((attachment) => attachment.kind === "image") &&
-    preferences.visionModelId
-  )
-    return preferences.visionModelId;
-  if (
-    preferences.codingModelId &&
-    /(?:\b(?:code|coding|debug|bug|repository|repo|pull request|branch|function|typescript|javascript|python|api|deploy|build|test)\b)|(?:کوڈ|کوڈنگ|بگ|ریپوزٹری|برانچ|ٹیسٹ|ڈپلائے)/i.test(
-      text,
-    )
-  )
-    return preferences.codingModelId;
-  return preferences.modelId;
 }
 
 function toolActivityMetadata(
