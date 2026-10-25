@@ -38,6 +38,22 @@ Raabta runs as an agent rather than a single-shot assistant. Every user request 
 
 A verification step always runs before the final answer, so the model is instructed to check that its own tool results actually satisfy the request. Plans stay truthful: only steps backed by a real tool result are marked done.
 
+### Approvals that do not nag
+
+Consequential tools are classified by risk. Read-only tools never prompt. Write tools (commit a file, create an issue, create a branch, write a workspace file) prompt once, and choosing **Always allow** stores that decision on the device so the agent stops asking for the same action. Destructive tools (delete a workspace file, open a pull request, dispatch a workflow) are never remembered and always confirm. A decision you decline is remembered too, so the agent reports that it skipped the action instead of asking again. The approval card shows the exact content that will be sent and a clear risk badge, not a vague label.
+
+### Verifying its own work without a shell
+
+The agent runs entirely inside the Android app, so it has no terminal, no browser engine and no test runner. Instead of pretending otherwise, it checks its own work locally:
+
+- Before each task the app probes the device (`lib/agent/capabilities.ts`) and tells the model the truth: workspace available, no shell, page reads over HTTP only, no background work.
+- After each task `lib/agent/verifier.ts` compares the answer against the recorded evidence. It flags claims no tool result supports (a commit that was never made, a pull request that was never opened), links with no retrieved source, failed or unapproved steps and empty results.
+- A collapsible review card shows the coverage, the tool counts and each finding, with a **Fix and continue** action that asks the agent to repair the unsupported parts.
+
+### Local task journal
+
+`lib/agent/journal.ts` keeps a bounded, on-device record of completed tasks: the goal, intent, plan progress, which tools ran and the verification outcome. It stores tool names and statuses only, never arguments or secrets. Recent entries are fed back to the model so a follow-up request is grounded in what actually happened.
+
 ### Workspace tools
 
 The private app-only workspace now supports the full file lifecycle the agent needs: create directory, list, read, write/create, search, file info, move/rename and delete. Every path is confined to the app's own documents directory, parent traversal is rejected, and the same 100 MB total / 10 MB per file limits apply. Moving a file refuses to overwrite an existing target.

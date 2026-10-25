@@ -28,6 +28,7 @@ export async function makeProviderMessages(
     prompt: string,
   ) => Promise<string>,
   plan?: AgentPlan,
+  agentContext?: string,
 ): Promise<ChatRequestMessage[]> {
   const output: ChatRequestMessage[] = [];
   const toolList = tools.map(({ function: tool }) => ({
@@ -49,6 +50,12 @@ export async function makeProviderMessages(
     output.push({
       role: "system",
       content: `The app has published this plan to the user for the current task. Follow it in order and adapt only if a tool result makes a step unnecessary.\nGoal: ${plan.goal}\nIntent: ${plan.intent}\nPlan:\n${lines}\nWhen the goal is reached, end with a short plain-language summary of what you actually did and what remains.`,
+    });
+  }
+  if (agentContext && agentContext.trim()) {
+    output.push({
+      role: "system",
+      content: `What this device can actually do right now, and what you have recently completed (authoritative, do not contradict it):\n${agentContext.slice(0, 6_000)}`,
     });
   }
   if (githubContext.trim()) {
