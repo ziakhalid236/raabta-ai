@@ -56,7 +56,7 @@ describe("private AI workspace", () => {
   });
 
   it("exposes a fixed storage ceiling", () => {
-    expect(AI_WORKSPACE_MAX_BYTES).toBe(25 * 1024 * 1024);
+    expect(AI_WORKSPACE_MAX_BYTES).toBe(100 * 1024 * 1024);
   });
 
   it("deletes only a named file inside the private workspace", async () => {
@@ -68,12 +68,12 @@ describe("private AI workspace", () => {
     await expect(deleteAIWorkspaceFile("../outside.txt")).rejects.toThrow(/Parent-directory/);
   });
 
-  it("refuses writes that would exceed the total 25 MB quota", async () => {
-    const fullFile = "x".repeat(512 * 1024);
-    for (let index = 0; index < 50; index += 1) {
+  it("refuses writes that would exceed the total 100 MB quota", async () => {
+    const fullFile = "x".repeat(10 * 1024 * 1024);
+    for (let index = 0; index < 10; index += 1) {
       files.set(`file:///private/raabta/ai-workspace/${index}.txt`, fullFile);
     }
-    await expect(writeAIWorkspaceFile("extra.txt", "x")).rejects.toThrow(/25 MB/);
+    await expect(writeAIWorkspaceFile("extra.txt", "x")).rejects.toThrow(/100 MB/);
     expect(files.has("file:///private/raabta/ai-workspace/extra.txt")).toBe(false);
   });
 });

@@ -18,6 +18,17 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   activityStatus?: "working" | "complete" | "failed" | "stopped";
+  activityKind?:
+    | "plan"
+    | "research"
+    | "model"
+    | "file"
+    | "github"
+    | "workspace"
+    | "verify"
+    | "deploy"
+    | "agent";
+  activityPlatform?: string;
   attachments?: ChatAttachment[];
 };
 
@@ -37,6 +48,10 @@ export type ChatPreferences = {
   providerKeyBaseUrl: string;
   modelId: string;
   modelName: string;
+  visionModelId: string;
+  visionModelName: string;
+  codingModelId: string;
+  codingModelName: string;
   modelSupportsImages: boolean;
   transcriptionModelId: string;
   transcriptionModelName: string;
@@ -61,6 +76,10 @@ export const DEFAULT_PREFERENCES: ChatPreferences = {
   providerKeyBaseUrl: "",
   modelId: "",
   modelName: "",
+  visionModelId: "",
+  visionModelName: "",
+  codingModelId: "",
+  codingModelName: "",
   modelSupportsImages: false,
   transcriptionModelId: "",
   transcriptionModelName: "",
@@ -133,6 +152,10 @@ export async function loadPreferences(): Promise<ChatPreferences> {
       providerKeyBaseUrl,
       modelId: isCurrentSchema ? stringValue(data.modelId) : "",
       modelName: isCurrentSchema ? stringValue(data.modelName) : "",
+      visionModelId: isCurrentSchema ? stringValue(data.visionModelId) : "",
+      visionModelName: isCurrentSchema ? stringValue(data.visionModelName) : "",
+      codingModelId: isCurrentSchema ? stringValue(data.codingModelId) : "",
+      codingModelName: isCurrentSchema ? stringValue(data.codingModelName) : "",
       modelSupportsImages: isCurrentSchema && data.modelSupportsImages === true,
       transcriptionModelId: isCurrentSchema
         ? stringValue(data.transcriptionModelId)

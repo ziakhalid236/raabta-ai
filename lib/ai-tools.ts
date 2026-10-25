@@ -159,7 +159,7 @@ const GITHUB_TOOLS: AiToolDefinition[] = [
     function: {
       name: "github_update_file",
       description:
-        "Prepare a text file update and commit in a connected GitHub repository. The app asks the user to approve the exact change before writing.",
+        "Prepare a text file update or creation and commit it in a connected GitHub repository. Files up to 50 MB use GitHub's Git Data API; the app asks the user to approve the exact change before writing.",
       parameters: {
         type: "object",
         properties: {

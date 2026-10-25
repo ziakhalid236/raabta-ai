@@ -28,6 +28,8 @@ export type GitHubWorkflowRun = {
 };
 const API = "https://api.github.com";
 const API_VERSION = "2026-03-10";
+const CONTENTS_API_MAX_BYTES = 900 * 1024;
+const MAX_GITHUB_TEXT_BYTES = 50 * 1024 * 1024;
 export class GitHubToolError extends Error {
   constructor(
     message: string,
@@ -108,6 +110,11 @@ export async function updateGitHubFile(args: {
   branch?: string;
   signal?: AbortSignal;
 }): Promise<GitHubWriteResult> {
+  const contentBytes = new TextEncoder().encode(args.content).length;
+  if (contentBytes > MAX_GITHUB_TEXT_BYTES)
+    throw new GitHubToolError("GitHub text files are limited to 50 MB per commit.");
+  if (contentBytes > CONTENTS_API_MAX_BYTES)
+    return commitLargeGitHubFile(args);
   let currentSha: string | undefined;
   try {
     const currentResponse = await githubFetch(
@@ -156,6 +163,81 @@ export async function updateGitHubFile(args: {
     sha: payload?.content?.sha,
   };
 }
+
+async function commitLargeGitHubFile(args: {
+  token: string;
+  repository: string;
+  path: string;
+  content: string;
+  message: string;
+  branch?: string;
+  signal?: AbortSignal;
+}): Promise<GitHubWriteResult> {
+  const branch = args.branch || "main";
+  const refResponse = await githubFetch(
+    `/repos/${encodeRepository(args.repository)}/git/ref/heads/${encodeURIComponent(branch)}`,
+    args.token,
+    args.signal,
+  );
+  const ref: any = await refResponse.json().catch(() => null);
+  const headSha = typeof ref?.object?.sha === "string" ? ref.object.sha : "";
+  if (!headSha) throw new GitHubToolError("GitHub returned no branch head for the large-file commit.");
+
+  const commitResponse = await githubFetch(
+    `/repos/${encodeRepository(args.repository)}/git/commits/${headSha}`,
+    args.token,
+    args.signal,
+  );
+  const commit: any = await commitResponse.json().catch(() => null);
+  const baseTree = typeof commit?.tree?.sha === "string" ? commit.tree.sha : "";
+  if (!baseTree) throw new GitHubToolError("GitHub returned no base tree for the large-file commit.");
+
+  const blobResponse = await githubWrite(
+    `/repos/${encodeRepository(args.repository)}/git/blobs`,
+    args.token,
+    { content: toBase64Utf8(args.content), encoding: "base64" },
+    args.signal,
+  );
+  const blob: any = await blobResponse.json().catch(() => null);
+  const blobSha = typeof blob?.sha === "string" ? blob.sha : "";
+  if (!blobSha) throw new GitHubToolError("GitHub returned no blob identifier for the large file.");
+
+  const treeResponse = await githubWrite(
+    `/repos/${encodeRepository(args.repository)}/git/trees`,
+    args.token,
+    {
+      base_tree: baseTree,
+      tree: [{ path: args.path.replace(/^\//, ""), mode: "100644", type: "blob", sha: blobSha }],
+    },
+    args.signal,
+  );
+  const tree: any = await treeResponse.json().catch(() => null);
+  const treeSha = typeof tree?.sha === "string" ? tree.sha : "";
+  if (!treeSha) throw new GitHubToolError("GitHub returned no tree identifier for the large file.");
+
+  const newCommitResponse = await githubWrite(
+    `/repos/${encodeRepository(args.repository)}/git/commits`,
+    args.token,
+    { message: args.message, tree: treeSha, parents: [headSha] },
+    args.signal,
+  );
+  const newCommit: any = await newCommitResponse.json().catch(() => null);
+  const newCommitSha = typeof newCommit?.sha === "string" ? newCommit.sha : "";
+  if (!newCommitSha) throw new GitHubToolError("GitHub returned no commit identifier for the large file.");
+
+  await githubPatch(
+    `/repos/${encodeRepository(args.repository)}/git/refs/heads/${encodeURIComponent(branch)}`,
+    args.token,
+    { sha: newCommitSha, force: false },
+    args.signal,
+  );
+  return {
+    url: `https://github.com/${args.repository}/blob/${encodeURIComponent(branch)}/${args.path}`,
+    message: "Large file committed through GitHub's Git Data API.",
+    sha: blobSha,
+  };
+}
+
 export async function createGitHubIssue(args: {
   token: string;
   repository: string;
@@ -362,6 +444,37 @@ async function githubWrite(
   if (!response.ok)
     throw new GitHubToolError(
       `GitHub write request failed (HTTP ${response.status}).`,
+      response.status,
+    );
+  return response;
+}
+
+async function githubPatch(
+  path: string,
+  token: string,
+  body: unknown,
+  signal?: AbortSignal,
+) {
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      method: "PATCH",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": API_VERSION,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new GitHubToolError("Could not reach GitHub. Check the device network.");
+  }
+  if (!response.ok)
+    throw new GitHubToolError(
+      `GitHub branch update failed (HTTP ${response.status}).`,
       response.status,
     );
   return response;

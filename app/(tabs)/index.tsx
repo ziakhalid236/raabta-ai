@@ -66,6 +66,8 @@ import {
   writeApiKey,
 } from "@/lib/secure-credentials";
 import {
+  classifyCodingModels,
+  classifyVisionModels,
   discoverProviderModels,
   type ProviderCatalog,
   type ProviderModel,
@@ -351,7 +353,8 @@ export default function HomeScreen() {
     }
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
-      !preferences.modelSupportsImages
+      !preferences.modelSupportsImages &&
+      !preferences.visionModelId
     ) {
       setShowError(
         t(
@@ -366,6 +369,11 @@ export default function HomeScreen() {
     const chatDisplayName =
       preferences.modelName.trim() ||
       t("your selected model", "آپ کا منتخب ماڈل");
+    const selectedTaskModelId = selectTaskModel(
+      preferences,
+      text,
+      attachments,
+    );
     let currentThread = activeThread;
     if (!currentThread) {
       currentThread = createThread();
@@ -399,6 +407,8 @@ export default function HomeScreen() {
             ? `${chatDisplayName} کے لیے درخواست تیار کی جا رہی ہے۔`
             : `Preparing a request for ${chatDisplayName}.`),
       activityStatus: "working",
+      activityKind: "plan",
+      activityPlatform: "Raabta",
       createdAt,
     };
     const title = currentThread.messages.some(
@@ -434,19 +444,29 @@ export default function HomeScreen() {
         ),
       }));
     };
-    const addActivity = (content: string) => {
+    const addActivity = (
+      content: string,
+      metadata: Pick<ChatMessage, "activityKind" | "activityPlatform"> = {},
+    ) => {
+      const previousActivityId = activeActivityId;
       activeActivityId = makeId("activity");
       const createdAt = new Date().toISOString();
       updateThread(currentThread.id, (thread) => ({
         ...thread,
         updatedAt: createdAt,
         messages: [
-          ...thread.messages,
+          ...thread.messages.map((message) =>
+            message.id === previousActivityId && message.activityStatus === "working"
+              ? { ...message, activityStatus: "complete" as const }
+              : message,
+          ),
           {
             id: activeActivityId,
             role: "activity",
             content,
             activityStatus: "working",
+            activityKind: metadata.activityKind ?? "agent",
+            activityPlatform: metadata.activityPlatform ?? "Raabta",
             createdAt,
           },
         ],
@@ -702,6 +722,7 @@ export default function HomeScreen() {
               role: "activity",
               content: label,
               activityStatus: "working",
+              ...toolActivityMetadata(name),
               createdAt,
             },
           ],
@@ -775,6 +796,7 @@ export default function HomeScreen() {
             "Preparing the source excerpts and conversation for your chosen model.",
             "آپ کے منتخب model کے لیے source اقتباسات اور گفتگو تیار ہو رہی ہے۔",
           ),
+          { activityKind: "research", activityPlatform: "Web research" },
         );
       } else if (shouldAutoResearch(text)) {
         const retrieved = await searchWeb(text, controller.signal);
@@ -794,6 +816,20 @@ export default function HomeScreen() {
       }
       if (controller.signal.aborted)
         throw new Error("Request stopped before sending.");
+      addActivity(
+        t(
+          `Selected the task model: ${selectedTaskModelId}`,
+          `اس task کے لیے model منتخب کیا گیا: ${selectedTaskModelId}`,
+        ),
+        { activityKind: "model", activityPlatform: "AI provider" },
+      );
+      addActivity(
+        t(
+          "Analyzing the task and preparing the model context.",
+          "task کا تجزیہ اور model context تیار کیا جا رہا ہے۔",
+        ),
+        { activityKind: "plan", activityPlatform: "Raabta" },
+      );
       const latestThread = threadsRef.current.find(
         (thread) => thread.id === currentThread.id,
       );
@@ -825,7 +861,7 @@ export default function HomeScreen() {
           : undefined,
       );
       const answer = await requestChatCompletion({
-        modelId: preferences.modelId,
+        modelId: selectedTaskModelId,
         apiKey,
         messages: providerMessages,
         signal: controller.signal,
@@ -833,6 +869,13 @@ export default function HomeScreen() {
         tools: availableTools,
         executeTool,
       });
+      updateActivity(
+        t(
+          "Model response received and verified for display.",
+          "model کا جواب موصول اور display کے لیے verify ہو گیا ہے۔",
+        ),
+        "complete",
+      );
       const assistantMessage: ChatMessage = {
         id: makeId("message"),
         role: "assistant",
@@ -1196,6 +1239,14 @@ export default function HomeScreen() {
       const selectedVoice = catalog.transcriptionModels.find(
         (model) => model.id === preferences.transcriptionModelId,
       );
+      const selectedVision =
+        classifyVisionModels(catalog.chatModels).find(
+          (model) => model.id === preferences.visionModelId,
+        ) ?? classifyVisionModels(catalog.chatModels)[0];
+      const selectedCoding =
+        classifyCodingModels(catalog.chatModels).find(
+          (model) => model.id === preferences.codingModelId,
+        ) ?? classifyCodingModels(catalog.chatModels)[0];
       // Bind the key to this endpoint only after the model catalog succeeds.
       await writeApiKey(candidateKey);
       setHasKey(true);
@@ -1211,6 +1262,10 @@ export default function HomeScreen() {
         providerKeyBaseUrl: providerBaseUrl,
         modelId: selectedChat?.id ?? "",
         modelName: selectedChat?.name ?? "",
+        visionModelId: selectedVision?.id ?? "",
+        visionModelName: selectedVision?.name ?? "",
+        codingModelId: selectedCoding?.id ?? "",
+        codingModelName: selectedCoding?.name ?? "",
         modelSupportsImages:
           catalog.providerKind === "cloudflare-worker" ||
           Boolean(selectedChat?.inputModalities.includes("image")),
@@ -1365,6 +1420,10 @@ export default function HomeScreen() {
         providerKeyBaseUrl: "",
         modelId: "",
         modelName: "",
+        visionModelId: "",
+        visionModelName: "",
+        codingModelId: "",
+        codingModelName: "",
         modelSupportsImages: false,
         transcriptionModelId: "",
         transcriptionModelName: "",
@@ -2165,8 +2224,8 @@ export default function HomeScreen() {
           />
           <Notice
             text={t(
-              "AI workspace files stay in Raabta's private app storage (25 MB total; 512 KB per file). The agent cannot access your other phone files or run arbitrary terminal commands.",
-              "AI workspace کی فائلیں رابطہ کی نجی app storage میں رہتی ہیں (کل 25 MB؛ فی فائل 512 KB)۔ ایجنٹ دوسری فون فائلیں نہیں پڑھ سکتا اور خود سے terminal commands نہیں چلا سکتا۔",
+              "AI workspace files stay in Raabta's private app storage (100 MB total; 10 MB per file). The agent cannot access your other phone files or run arbitrary terminal commands.",
+              "AI workspace کی فائلیں Raabta کی نجی app storage میں رہتی ہیں (کل 100 MB؛ فی فائل 10 MB)۔ ایجنٹ دوسری فون فائلیں نہیں پڑھ سکتا اور خود سے terminal commands نہیں چلا سکتا۔",
             )}
           />
           <View style={styles.keyInputWrap}>
@@ -2352,6 +2411,31 @@ export default function HomeScreen() {
                     "Text model · تصاویر کے لیے image-capable model منتخب کریں",
                   )}
             </Text>
+          ) : null}
+          {preferences.modelId ? (
+            <View style={styles.routingCard}>
+              <View style={styles.routingHeader}>
+                <Ionicons name="git-network-outline" size={16} color={C.teal} />
+                <Text style={styles.routingTitle}>
+                  {t("Automatic task routing", "خودکار task routing")}
+                </Text>
+              </View>
+              <Text style={styles.routingLine}>
+                {t("Text: ", "Text: ")}{preferences.modelName || preferences.modelId}
+              </Text>
+              <Text style={styles.routingLine}>
+                {t("Vision: ", "Vision: ")}
+                {preferences.visionModelName || t("Not reported by provider", "provider نے نہیں بتایا")}
+              </Text>
+              <Text style={styles.routingLine}>
+                {t("Coding: ", "Coding: ")}
+                {preferences.codingModelName || t("Text model fallback", "text model fallback")}
+              </Text>
+              <Text style={styles.routingLine}>
+                {t("Voice: ", "Voice: ")}
+                {preferences.transcriptionModelName || t("Not available", "دستیاب نہیں")}
+              </Text>
+            </View>
           ) : null}
 
           <FieldLabel
@@ -2656,6 +2740,67 @@ function shouldAutoResearch(text: string): boolean {
   );
 }
 
+function selectTaskModel(
+  preferences: ChatPreferences,
+  text: string,
+  attachments: ChatAttachment[],
+): string {
+  if (attachments.some((attachment) => attachment.kind === "image") && preferences.visionModelId)
+    return preferences.visionModelId;
+  if (
+    preferences.codingModelId &&
+    /\b(code|coding|debug|bug|repository|repo|pull request|branch|function|typescript|javascript|python|api|deploy|build|test)\b|کوڈ|کوڈنگ|بگ|ریپوزٹری|برانچ|ٹیسٹ|ڈپلائے/i.test(
+      text,
+    )
+  )
+    return preferences.codingModelId;
+  return preferences.modelId;
+}
+
+function toolActivityMetadata(
+  name: string,
+): Pick<ChatMessage, "activityKind" | "activityPlatform"> {
+  if (name.startsWith("github_")) {
+    const kind: ChatMessage["activityKind"] =
+      name.includes("workflow") || name.includes("branch") || name.includes("pull")
+        ? "deploy"
+        : name.includes("file") || name.includes("issue")
+          ? "file"
+          : "github";
+    return { activityKind: kind, activityPlatform: "GitHub" };
+  }
+  if (name.startsWith("web_") || name.includes("research"))
+    return { activityKind: "research", activityPlatform: "Web research" };
+  if (name.startsWith("ai_workspace_"))
+    return { activityKind: "workspace", activityPlatform: "Raabta workspace" };
+  if (name.includes("test") || name.includes("check") || name.includes("verify"))
+    return { activityKind: "verify", activityPlatform: "Engineering checks" };
+  return { activityKind: "agent", activityPlatform: "Raabta" };
+}
+
+function activityVisual(message: ChatMessage): { icon: IconName; platform: string } {
+  switch (message.activityKind) {
+    case "research":
+      return { icon: "search-outline", platform: "Web research" };
+    case "model":
+      return { icon: "sparkles-outline", platform: "AI model" };
+    case "file":
+      return { icon: "document-text-outline", platform: message.activityPlatform ?? "Files" };
+    case "github":
+      return { icon: "logo-github", platform: "GitHub" };
+    case "workspace":
+      return { icon: "folder-open-outline", platform: "Raabta workspace" };
+    case "verify":
+      return { icon: "shield-checkmark-outline", platform: "Verification" };
+    case "deploy":
+      return { icon: "cloud-upload-outline", platform: message.activityPlatform ?? "Deployment" };
+    case "plan":
+      return { icon: "git-branch-outline", platform: message.activityPlatform ?? "Agent plan" };
+    default:
+      return { icon: "construct-outline", platform: message.activityPlatform ?? "Raabta agent" };
+  }
+}
+
 function MessageRow({
   message,
   language,
@@ -2673,13 +2818,14 @@ function MessageRow({
     )
       return null;
     const icon: IconName =
-      status === "working"
-        ? "sync-outline"
-        : status === "failed"
-          ? "alert-circle-outline"
-          : status === "stopped"
-            ? "stop-circle-outline"
-            : "checkmark-circle-outline";
+      activityVisual(message).icon;
+    const iconColor =
+      status === "failed"
+        ? C.danger
+        : status === "stopped"
+          ? C.muted
+          : C.teal;
+    const platform = message.activityPlatform ?? activityVisual(message).platform;
     return (
       <View
         style={[
@@ -2688,20 +2834,32 @@ function MessageRow({
           status === "stopped" && styles.activityRowStopped,
         ]}
       >
-        <Ionicons
-          name={icon}
-          size={14}
-          color={
-            status === "failed"
-              ? C.danger
-              : status === "stopped"
-                ? C.muted
-                : C.teal
-          }
-        />
-        <Text style={[styles.activityText, styles.autoDirection]}>
-          {message.content}
-        </Text>
+        <View style={styles.activityIconBadge}>
+          <Ionicons name={icon} size={15} color={iconColor} />
+        </View>
+        <View style={styles.activityBody}>
+          <Text style={styles.activityPlatform}>{platform}</Text>
+          <Text style={[styles.activityText, styles.autoDirection]}>
+            {message.content}
+          </Text>
+        </View>
+        <View style={styles.activityStatusIcon}>
+          {status === "working" ? (
+            <ActivityIndicator size="small" color={C.teal} />
+          ) : (
+            <Ionicons
+              name={
+                status === "failed"
+                  ? "alert-circle-outline"
+                  : status === "stopped"
+                    ? "stop-circle-outline"
+                    : "checkmark-circle-outline"
+              }
+              size={14}
+              color={iconColor}
+            />
+          )}
+        </View>
         <Text style={styles.activityTime}>{formatTime(message.createdAt)}</Text>
       </View>
     );
@@ -3324,6 +3482,17 @@ const styles = StyleSheet.create({
   },
   setupTitle: { color: C.ink, fontSize: 14, fontWeight: "600" },
   setupSubtitle: { color: C.muted, fontSize: 11, marginTop: 3 },
+  routingCard: {
+    padding: 12,
+    borderRadius: 15,
+    backgroundColor: "#F0F7F4",
+    borderWidth: 1,
+    borderColor: "#D6E8E1",
+    gap: 4,
+  },
+  routingHeader: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 2 },
+  routingTitle: { color: C.tealDark, fontSize: 12, fontWeight: "700" },
+  routingLine: { color: C.muted, fontSize: 11, lineHeight: 17 },
   messageRow: {
     width: "100%",
     flexDirection: "row",
@@ -3358,15 +3527,26 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     maxWidth: "96%",
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 7,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 99,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 15,
     backgroundColor: "#EEF4F1",
     borderWidth: 1,
     borderColor: "#DDEAE5",
   },
+  activityIconBadge: {
+    width: 25,
+    height: 25,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: C.white,
+  },
+  activityBody: { flex: 1, minWidth: 0 },
+  activityPlatform: { color: C.tealDark, fontSize: 9, fontWeight: "700" },
+  activityStatusIcon: { width: 16, alignItems: "center", paddingTop: 4 },
   activityRowFailed: { backgroundColor: C.dangerPale, borderColor: "#F1D2CD" },
   activityRowStopped: { backgroundColor: "#F0F1EE", borderColor: C.line },
   activityText: {

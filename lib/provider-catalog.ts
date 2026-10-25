@@ -14,6 +14,8 @@ export type ProviderModel = {
 
 export type ProviderCatalog = {
   chatModels: ProviderModel[];
+  visionModels: ProviderModel[];
+  codingModels: ProviderModel[];
   transcriptionModels: ProviderModel[];
   transcriptionWarning?: string;
   providerKind: "generic" | "cloudflare-worker";
@@ -58,6 +60,8 @@ export async function discoverProviderModels(
       : "generic";
     return {
       chatModels,
+      visionModels: classifyVisionModels(chatModels),
+      codingModels: classifyCodingModels(chatModels),
       transcriptionModels:
         providerKind === "cloudflare-worker"
           ? [
@@ -78,6 +82,8 @@ export async function discoverProviderModels(
   } catch {
     return {
       chatModels,
+      visionModels: classifyVisionModels(chatModels),
+      codingModels: classifyCodingModels(chatModels),
       transcriptionModels: [],
       providerKind: chatModels.some((model) => model.id.startsWith("zoya-"))
         ? "cloudflare-worker"
@@ -226,6 +232,23 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+export function classifyVisionModels(models: ProviderModel[]): ProviderModel[] {
+  return models.filter(
+    (model) =>
+      model.inputModalities.some((modality) =>
+        /image|vision|multimodal/i.test(modality),
+      ) || /vision|multimodal|vl|image/i.test(`${model.id} ${model.name} ${model.description}`),
+  );
+}
+
+export function classifyCodingModels(models: ProviderModel[]): ProviderModel[] {
+  return models.filter((model) =>
+    /code|coder|coding|codestral|devstral|starcoder|program|engineering|developer/i.test(
+      `${model.id} ${model.name} ${model.description}`,
+    ),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
