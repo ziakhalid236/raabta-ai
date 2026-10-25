@@ -38,7 +38,7 @@ export async function requestChatCompletion(args: {
   executeTool?: ChatToolCallExecutor;
 }): Promise<string> {
   const chatUrl = `${(args.baseUrl ?? "").replace(/\/$/, "")}/chat/completions`;
-  const messages = [...args.messages] as Array<Record<string, unknown>>;
+  const messages = [...args.messages] as Record<string, unknown>[];
   const completedToolActions = new Map<string, string>();
   const maxToolRounds = 8;
   let malformedToolResponses = 0;

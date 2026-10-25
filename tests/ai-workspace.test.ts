@@ -31,12 +31,21 @@ vi.mock("expo-file-system/legacy", () => ({
   deleteAsync: vi.fn(async (path: string) => {
     files.delete(path);
   }),
+  moveAsync: vi.fn(async ({ from, to }: { from: string; to: string }) => {
+    const content = files.get(from);
+    if (content === undefined) throw new Error("missing");
+    files.delete(from);
+    files.set(to, content);
+  }),
 }));
 
 import {
   AI_WORKSPACE_MAX_BYTES,
+  createAIWorkspaceDirectory,
   deleteAIWorkspaceFile,
+  getAIWorkspaceFileInfo,
   listAIWorkspaceFiles,
+  moveAIWorkspaceFile,
   readAIWorkspaceFile,
   writeAIWorkspaceFile,
 } from "../lib/ai-workspace";
@@ -75,5 +84,42 @@ describe("private AI workspace", () => {
     }
     await expect(writeAIWorkspaceFile("extra.txt", "x")).rejects.toThrow(/100 MB/);
     expect(files.has("file:///private/raabta/ai-workspace/extra.txt")).toBe(false);
+  });
+
+  it("creates nested directories without writing a file", async () => {
+    await expect(createAIWorkspaceDirectory("reports/2026")).resolves.toMatchObject({
+      path: "reports/2026",
+    });
+    expect(files.size).toBe(0);
+    await expect(createAIWorkspaceDirectory("../escape")).rejects.toThrow(/Parent-directory/);
+  });
+
+  it("moves a file and refuses to overwrite an existing one", async () => {
+    await writeAIWorkspaceFile("draft.txt", "v1");
+    await expect(moveAIWorkspaceFile("draft.txt", "final/notes.txt")).resolves.toMatchObject({
+      from: "draft.txt",
+      to: "final/notes.txt",
+    });
+    await expect(readAIWorkspaceFile("draft.txt")).rejects.toThrow(/not found/);
+    await expect(readAIWorkspaceFile("final/notes.txt")).resolves.toBe("v1");
+
+    await writeAIWorkspaceFile("other.txt", "v2");
+    await expect(moveAIWorkspaceFile("other.txt", "final/notes.txt")).rejects.toThrow(
+      /already exists/,
+    );
+  });
+
+  it("reports file info and treats missing paths as absent", async () => {
+    await writeAIWorkspaceFile("notes/todo.txt", "hello world");
+    const info = await getAIWorkspaceFileInfo("notes/todo.txt");
+    expect(info).toMatchObject({ path: "notes/todo.txt", exists: true, isDirectory: false });
+    expect(info.bytes).toBe(11);
+    expect(info.lines).toBe(1);
+    await expect(getAIWorkspaceFileInfo("missing.txt")).resolves.toMatchObject({
+      path: "missing.txt",
+      exists: false,
+      bytes: 0,
+    });
+    await expect(getAIWorkspaceFileInfo("../escape.txt")).rejects.toThrow(/Parent-directory/);
   });
 });

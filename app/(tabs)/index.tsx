@@ -40,13 +40,18 @@ import {
 import { getLiveToolDefinitions } from "@/lib/ai-tools";
 import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
 import {
+  createAIWorkspaceDirectory,
   deleteAIWorkspaceFile,
   findAIWorkspaceText,
+  getAIWorkspaceFileInfo,
   getAIWorkspaceUsage,
   listAIWorkspaceFiles,
+  moveAIWorkspaceFile,
   readAIWorkspaceFile,
   writeAIWorkspaceFile,
 } from "@/lib/ai-workspace";
+import { buildAgentPlan } from "@/lib/agent/planner";
+import { AgentTaskController, type AgentTask } from "@/lib/agent/task";
 import {
   createThread,
   DEFAULT_PREFERENCES,
@@ -90,6 +95,8 @@ import {
 } from "@/lib/github-tools";
 import { AttachmentSheet } from "@/components/raabta/attachment-sheet";
 import { AccountsSheet } from "@/components/raabta/accounts-sheet";
+import { AgentPlanCard } from "@/components/raabta/agent-plan-card";
+import { StarterPromptGrid } from "@/components/raabta/starter-prompts";
 import { ModelPicker } from "@/components/raabta/model-picker";
 import {
   disposeAudioFile,
@@ -222,6 +229,8 @@ export default function HomeScreen() {
   const [pageUrlDraft, setPageUrlDraft] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [agentTask, setAgentTask] = useState<AgentTask | null>(null);
+  const [planExpanded, setPlanExpanded] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -312,6 +321,7 @@ export default function HomeScreen() {
     setShowError("");
     setDraft("");
     setPendingAttachments([]);
+    setAgentTask(null);
     Keyboard.dismiss();
   }, [replaceThreads]);
 
@@ -385,6 +395,12 @@ export default function HomeScreen() {
       setActiveThreadId(currentThread.id);
     }
     const createdAt = new Date().toISOString();
+    const agentPlan = buildAgentPlan({
+      request: text || "Examine the attached media.",
+      attachmentKinds: attachments.map((attachment) => attachment.kind),
+      githubConnected: Boolean(githubProfile),
+    });
+    setPlanExpanded(true);
     const userMessage: ChatMessage = {
       id: makeId("message"),
       role: "user",
@@ -477,6 +493,10 @@ export default function HomeScreen() {
       }));
     };
 
+    const taskController = new AgentTaskController(agentPlan, (task) =>
+      setAgentTask(task),
+    );
+
     try {
       const apiKey = await readApiKey();
       if (!apiKey)
@@ -561,6 +581,21 @@ export default function HomeScreen() {
               String(args.path ?? ""),
               String(args.content ?? ""),
             ),
+          );
+        if (name === "ai_workspace_create_directory")
+          return JSON.stringify(
+            await createAIWorkspaceDirectory(String(args.path ?? "")),
+          );
+        if (name === "ai_workspace_move_file")
+          return JSON.stringify(
+            await moveAIWorkspaceFile(
+              String(args.fromPath ?? ""),
+              String(args.toPath ?? ""),
+            ),
+          );
+        if (name === "ai_workspace_file_info")
+          return JSON.stringify(
+            await getAIWorkspaceFileInfo(String(args.path ?? "")),
           );
         if (name === "ai_workspace_delete_file")
           return JSON.stringify(
@@ -710,6 +745,9 @@ export default function HomeScreen() {
           ai_workspace_find_text: ["Searching workspace text", "workspace کے متن میں تلاش جاری ہے"],
           ai_workspace_read_file: ["Reading a private workspace file", "نجی workspace فائل پڑھی جا رہی ہے"],
           ai_workspace_write_file: ["Writing a private workspace file", "نجی workspace فائل لکھی جا رہی ہے"],
+          ai_workspace_create_directory: ["Creating a private workspace folder", "نجی workspace فولڈر بنایا جا رہا ہے"],
+          ai_workspace_move_file: ["Moving a private workspace file", "نجی workspace فائل منتقل کی جا رہی ہے"],
+          ai_workspace_file_info: ["Inspecting a private workspace file", "نجی workspace فائل کا جائزہ لیا جا رہا ہے"],
           ai_workspace_delete_file: ["Preparing to delete a private workspace file", "نجی workspace فائل حذف کرنے کی تیاری"],
           github_list_repositories: ["Listing GitHub repositories", "GitHub repositories دیکھی جا رہی ہیں"],
           github_list_files: ["Listing repository files", "repository کی فائلیں دیکھی جا رہی ہیں"],
@@ -730,6 +768,7 @@ export default function HomeScreen() {
         const label = `${t(englishLabel, urduLabel)}${suffix}`;
         const eventId = makeId("activity");
         const createdAt = new Date().toISOString();
+        const planEventId = taskController.recordToolStart(name, label);
         const writeAction =
           name === "github_update_file" ||
           name === "github_create_issue" ||
@@ -785,16 +824,23 @@ export default function HomeScreen() {
                 "آپ نے منسوخ کیا؛ کوئی تبدیلی نہیں کی گئی۔",
               );
               finishEvent(cancelled, "stopped");
+              taskController.recordToolEnd(planEventId, "blocked", cancelled);
               return cancelled;
             }
           }
           const result = await executeToolAction(name, args);
           finishEvent(`${label} — ${t("complete", "مکمل")}`, "complete");
+          taskController.recordToolEnd(planEventId, "done", label);
           return result;
         } catch (error) {
           finishEvent(
             `${label} — ${t("failed", "ناکام")}: ${safeTaskError(error)}`,
             "failed",
+          );
+          taskController.recordToolEnd(
+            planEventId,
+            "failed",
+            `${label} — ${safeTaskError(error)}`,
           );
           throw error;
         }
@@ -897,6 +943,7 @@ export default function HomeScreen() {
               });
             }
           : undefined,
+        agentPlan,
       );
       addActivity(
         t(
@@ -905,6 +952,11 @@ export default function HomeScreen() {
         ),
         { activityKind: "model", activityPlatform: "AI provider" },
       );
+      const verifyIndex = agentPlan.steps.findIndex((step) => step.kind === "verify");
+      if (verifyIndex >= 0) {
+        taskController.setStatus("verifying");
+        taskController.advanceTo(verifyIndex);
+      }
       const answer = await requestChatCompletion({
         modelId: selectedTaskModelId,
         apiKey,
@@ -932,9 +984,11 @@ export default function HomeScreen() {
         updatedAt: assistantMessage.createdAt,
         messages: [...thread.messages, assistantMessage],
       }));
+      taskController.finish("done");
     } catch (error) {
       const stopped = controller.signal.aborted;
       const safeError = safeTaskError(error);
+      taskController.finish(stopped ? "stopped" : "failed");
       updateActivity(
         stopped
           ? t("Request stopped by you.", "آپ نے درخواست روک دی۔")
@@ -1608,6 +1662,14 @@ export default function HomeScreen() {
               scrollRef.current?.scrollToEnd({ animated: true })
             }
           >
+            {agentTask ? (
+              <AgentPlanCard
+                task={agentTask}
+                isUrdu={preferences.language === "ur"}
+                expanded={planExpanded}
+                onToggle={() => setPlanExpanded((current) => !current)}
+              />
+            ) : null}
             {!isReady ? (
               <View style={styles.loadingHistory}>
                 <ActivityIndicator color={C.teal} />
@@ -1685,6 +1747,12 @@ export default function HomeScreen() {
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={C.muted} />
                 </Pressable>
+                {providerConnected && preferences.modelId ? (
+                  <StarterPromptGrid
+                    isUrdu={preferences.language === "ur"}
+                    onPick={(prompt) => void dispatchUserTask(prompt, [])}
+                  />
+                ) : null}
               </View>
             )}
             {(isSending || isTranscribing) && (
@@ -2831,7 +2899,8 @@ function ComposerIconButton({
 }
 
 function shouldAutoResearch(text: string): boolean {
-  return /\b(latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather|قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)\b/i.test(
+  // `\b` does not work for Urdu script, so Urdu keywords are matched literally.
+  return /(?:\b(?:latest|current|today|news|research|search|internet|web|online|real[- ]?time|recent|price|weather)\b)|(?:قیمت|تازہ|آج|تحقیق|انٹرنیٹ|ویب|خبر)/i.test(
     text,
   );
 }
@@ -2845,7 +2914,7 @@ function selectTaskModel(
     return preferences.visionModelId;
   if (
     preferences.codingModelId &&
-    /\b(code|coding|debug|bug|repository|repo|pull request|branch|function|typescript|javascript|python|api|deploy|build|test)\b|کوڈ|کوڈنگ|بگ|ریپوزٹری|برانچ|ٹیسٹ|ڈپلائے/i.test(
+    /(?:\b(?:code|coding|debug|bug|repository|repo|pull request|branch|function|typescript|javascript|python|api|deploy|build|test)\b)|(?:کوڈ|کوڈنگ|بگ|ریپوزٹری|برانچ|ٹیسٹ|ڈپلائے)/i.test(
       text,
     )
   )

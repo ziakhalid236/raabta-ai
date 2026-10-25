@@ -108,6 +108,55 @@ const BASE_TOOLS: AiToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "ai_workspace_create_directory",
+      description:
+        "Create a folder (including any parents) inside the private Raabta AI workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: string("Relative folder path inside the AI workspace"),
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_workspace_move_file",
+      description:
+        "Move or rename a single text file within the private Raabta AI workspace. Refuses if the destination already exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          fromPath: string("Current relative file path"),
+          toPath: string("New relative file path"),
+        },
+        required: ["fromPath", "toPath"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_workspace_file_info",
+      description:
+        "Return size, line count and existence for a path in the private Raabta AI workspace without loading the whole file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: string("Relative path inside the AI workspace"),
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "ai_workspace_delete_file",
       description:
         "Delete a file only from Raabta's private AI workspace. The app requires the user's explicit approval first.",

@@ -1,9 +1,22 @@
 import type { AiToolDefinition } from "@/lib/ai-tools";
 import type { ChatContentPart, ChatRequestMessage } from "@/lib/ai-client";
 import type { ChatMessage } from "@/lib/chat-storage";
+import type { AgentPlan } from "@/lib/agent/planner";
 import { readImageAsDataUrl } from "@/lib/mobile-media";
 
 const MAX_CONTEXT_CHARS = 120_000;
+
+const AGENT_CONTRACT = `You are Raabta's agent, not a passive chat assistant. You complete the user's task yourself by planning, acting with tools, checking the result, and only then answering.
+
+Operating loop:
+1. Restate the goal to yourself and follow the numbered plan the app shows the user.
+2. Work the plan step by step. Use tools for every real fact or change; do not describe an action you can take — take it.
+3. After each tool result, decide whether the step is truly complete. If a result is empty, blocked or contradicts the goal, adapt: try a different query, path or tool instead of giving up or guessing.
+4. Do not stop after one tool call when the task needs more. Chain as many tools as the task requires.
+5. Before your final answer, verify: every claim about a file, commit, run or web source must come from a real tool result you received in this task.
+6. Only then write the final answer.
+
+Honesty rules: never claim a file was written, a commit pushed, a workflow run or a page read unless a tool result in this task confirms it. If something is impossible here (no shell, no package install, no merge, no background work while locked), say so plainly and give the best available alternative.`;
 
 export async function makeProviderMessages(
   messages: ChatMessage[],
@@ -14,6 +27,7 @@ export async function makeProviderMessages(
     attachment: NonNullable<ChatMessage["attachments"]>[number],
     prompt: string,
   ) => Promise<string>,
+  plan?: AgentPlan,
 ): Promise<ChatRequestMessage[]> {
   const output: ChatRequestMessage[] = [];
   const toolList = tools.map(({ function: tool }) => ({
@@ -24,9 +38,19 @@ export async function makeProviderMessages(
   output.push({
     role: "system",
     content:
-      "Raabta app capabilities and safety rules: The tools listed in the following system context are the only actions you can actually perform. Use a tool for real work; never claim an action succeeded unless its tool result confirms it. The private AI workspace is limited to Raabta app files; it is not a terminal and cannot run shell commands, install packages, or access other phone files. GitHub write actions require the user's explicit in-app approval before any change. Never request or reveal API tokens.\n\nTool compatibility: use native function/tool calls when supported. If this provider returns only plain text and you need a listed tool, return exactly this single-line envelope and nothing else: [[RAABTA_TOOL_CALL]]{\"name\":\"exact_tool_name\",\"arguments\":{}}[[/RAABTA_TOOL_CALL]]. Use valid JSON, only a listed tool name, and only its declared arguments. Do not put the envelope in a code block. After the app returns a tool result, continue normally; never repeat an identical action that already succeeded. If no listed tool is appropriate, answer normally and be clear about the limitation.\n\nAvailable tool definitions (authoritative):\n" +
+      AGENT_CONTRACT +
+      "\n\nRaabta app capabilities and safety rules: The tools listed in the following system context are the only actions you can actually perform. Use a tool for real work; never claim an action succeeded unless its tool result confirms it. The private AI workspace is limited to Raabta app files; it is not a terminal and cannot run shell commands, install packages, or access other phone files. GitHub write actions require the user's explicit in-app approval before any change. Never request or reveal API tokens.\n\nTool compatibility: use native function/tool calls when supported. If this provider returns only plain text and you need a listed tool, return exactly this single-line envelope and nothing else: [[RAABTA_TOOL_CALL]]{\"name\":\"exact_tool_name\",\"arguments\":{}}[[/RAABTA_TOOL_CALL]]. Use valid JSON, only a listed tool name, and only its declared arguments. Do not put the envelope in a code block. After the app returns a tool result, continue normally; never repeat an identical action that already succeeded. If no listed tool is appropriate, answer normally and be clear about the limitation.\n\nAvailable tool definitions (authoritative):\n" +
       JSON.stringify(toolList),
   });
+  if (plan && plan.steps.length) {
+    const lines = plan.steps
+      .map((step, index) => `${index + 1}. ${step.title}`)
+      .join("\n");
+    output.push({
+      role: "system",
+      content: `The app has published this plan to the user for the current task. Follow it in order and adapt only if a tool result makes a step unnecessary.\nGoal: ${plan.goal}\nIntent: ${plan.intent}\nPlan:\n${lines}\nWhen the goal is reached, end with a short plain-language summary of what you actually did and what remains.`,
+    });
+  }
   if (githubContext.trim()) {
     output.push({
       role: "system",

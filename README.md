@@ -28,6 +28,20 @@ The GitHub icon in the composer opens **Accounts**. Users may provide their own 
 
 Arbitrary shell execution, persistent background workers while the app is locked, repository deletion, pull-request merging, and unmanaged deployment actions are not available in this mobile-only release. Workflow dispatch is restricted to `engineering-checks.yml` on the `main` or `master` branch, with an approval preview of the exact ref and inputs. Engineering checks run only through workflow files already committed to the selected repository; Raabta does not upload or execute arbitrary shell scripts. The public source repository is a release mirror, not an in-app account connection. This boundary is intentional: a real terminal/background runner requires a separately secured runner service rather than silently executing commands on an Android app.
 
+### Stage 5 — Agent core: plan, act, verify
+
+Raabta runs as an agent rather than a single-shot assistant. Every user request is first turned into an explicit, visible plan:
+
+- `lib/agent/planner.ts` classifies the request intent (research, coding, GitHub, workspace, media, writing, general) from the text, attachments and GitHub connection state, then builds an ordered plan whose steps name the tools that will satisfy them. Keyword matching handles Urdu and English, because a Latin-only word boundary does not match Urdu script.
+- `lib/agent/task.ts` holds the live task state machine. It records every tool round as an event (running, done, failed, blocked), maps each tool result onto the matching plan step, advances to verification, and completes or fails the plan. Denied approvals become skipped steps rather than failures.
+- The chat screen builds the plan before dispatch, streams plan/tool events into the task controller, and renders a collapsible plan card above the conversation showing progress, the current step and the tool action log.
+
+A verification step always runs before the final answer, so the model is instructed to check that its own tool results actually satisfy the request. Plans stay truthful: only steps backed by a real tool result are marked done.
+
+### Workspace tools
+
+The private app-only workspace now supports the full file lifecycle the agent needs: create directory, list, read, write/create, search, file info, move/rename and delete. Every path is confined to the app's own documents directory, parent traversal is rejected, and the same 100 MB total / 10 MB per file limits apply. Moving a file refuses to overwrite an existing target.
+
 ## Privacy and permissions
 
 - On Android, the provider API key and GitHub token are held in separate Expo SecureStore entries. The app does not bundle keys or copy them into messages, chat preferences or Action Timeline records. Browser Preview keeps both credentials in session memory only.
