@@ -21,6 +21,62 @@ export type ProviderCatalog = {
   providerKind: "generic" | "cloudflare-worker";
 };
 
+const CLOUDFLARE_VISION_MODELS: ProviderModel[] = [
+  {
+    id: "@cf/moondream/moondream3.1-9B-A2B",
+    name: "Cloudflare Moondream 3.1 Vision",
+    description:
+      "Cloudflare-hosted open model for image questions, OCR and visual reasoning.",
+    inputModalities: ["text", "image"],
+    outputModalities: ["text"],
+    promptPrice: null,
+    completionPrice: null,
+    contextLength: null,
+  },
+  {
+    id: "@cf/meta/llama-3.2-11b-vision-instruct",
+    name: "Cloudflare Llama 3.2 Vision",
+    description:
+      "Cloudflare-hosted multimodal Llama model for image understanding.",
+    inputModalities: ["text", "image"],
+    outputModalities: ["text"],
+    promptPrice: null,
+    completionPrice: null,
+    contextLength: null,
+  },
+  {
+    id: "@cf/meta/llama-4-scout-17b-16e-instruct",
+    name: "Cloudflare Llama 4 Scout Vision",
+    description:
+      "Cloudflare-hosted multimodal Llama 4 model for image understanding.",
+    inputModalities: ["text", "image"],
+    outputModalities: ["text"],
+    promptPrice: null,
+    completionPrice: null,
+    contextLength: null,
+  },
+  {
+    id: "@cf/mistralai/mistral-small-3.1-24b-instruct",
+    name: "Cloudflare Mistral Small 3.1 Vision",
+    description: "Cloudflare-hosted Mistral model with vision input support.",
+    inputModalities: ["text", "image"],
+    outputModalities: ["text"],
+    promptPrice: null,
+    completionPrice: null,
+    contextLength: null,
+  },
+  {
+    id: "@cf/llava-hf/llava-1.5-7b-hf",
+    name: "Cloudflare LLaVA Vision",
+    description: "Cloudflare-hosted open vision-language model.",
+    inputModalities: ["text", "image"],
+    outputModalities: ["text"],
+    promptPrice: null,
+    completionPrice: null,
+    contextLength: null,
+  },
+];
+
 export class ProviderCatalogError extends Error {
   constructor(
     message: string,
@@ -55,12 +111,18 @@ export async function discoverProviderModels(
       signal,
       baseUrl,
     );
-    const providerKind = chatModels.some((model) => model.id.startsWith("zoya-"))
+    const providerKind = chatModels.some((model) =>
+      model.id.startsWith("zoya-"),
+    )
       ? "cloudflare-worker"
       : "generic";
+    const visionModels = mergeModels(
+      classifyVisionModels(chatModels),
+      isCloudflareEndpoint(baseUrl) ? CLOUDFLARE_VISION_MODELS : [],
+    );
     return {
       chatModels,
-      visionModels: classifyVisionModels(chatModels),
+      visionModels,
       codingModels: classifyCodingModels(chatModels),
       transcriptionModels:
         providerKind === "cloudflare-worker"
@@ -68,7 +130,8 @@ export async function discoverProviderModels(
               {
                 id: "cloudflare-auto-transcription",
                 name: "Cloudflare automatic voice transcription",
-                description: "Routes voice files to Cloudflare Whisper automatically.",
+                description:
+                  "Routes voice files to Cloudflare Whisper automatically.",
                 inputModalities: ["audio"],
                 outputModalities: ["transcription"],
                 promptPrice: null,
@@ -82,7 +145,10 @@ export async function discoverProviderModels(
   } catch {
     return {
       chatModels,
-      visionModels: classifyVisionModels(chatModels),
+      visionModels: mergeModels(
+        classifyVisionModels(chatModels),
+        isCloudflareEndpoint(baseUrl) ? CLOUDFLARE_VISION_MODELS : [],
+      ),
       codingModels: classifyCodingModels(chatModels),
       transcriptionModels: [],
       providerKind: chatModels.some((model) => model.id.startsWith("zoya-"))
@@ -102,7 +168,9 @@ async function fetchModelCollection(
 ): Promise<ProviderModel[]> {
   const normalizedBase = baseUrl.replace(/\/$/, "");
   if (!normalizedBase)
-    throw new ProviderCatalogError("Enter the HTTPS OpenAI-compatible /v1 base URL first.");
+    throw new ProviderCatalogError(
+      "Enter the HTTPS OpenAI-compatible /v1 base URL first.",
+    );
   const initial = new URL(`${normalizedBase}/models`);
   if (outputModality === "transcription")
     initial.searchParams.set("output_modalities", "transcription");
@@ -178,8 +246,11 @@ async function fetchModelCollection(
     );
   }
 
-  const compatibleModels = outputModality === "transcription"
-      ? models.filter((model) => model.outputModalities.includes("transcription"))
+  const compatibleModels =
+    outputModality === "transcription"
+      ? models.filter((model) =>
+          model.outputModalities.includes("transcription"),
+        )
       : models.filter(
           (model) =>
             model.outputModalities.length === 0 ||
@@ -207,7 +278,9 @@ function normalizeModel(value: unknown): ProviderModel | null {
     model.modalities;
   const inputModalities = stringArray(reportedInputModalities);
   if (
-    (capability?.vision === true || model.vision === true || model.supports_vision === true) &&
+    (capability?.vision === true ||
+      model.vision === true ||
+      model.supports_vision === true) &&
     !inputModalities.includes("image")
   ) {
     inputModalities.push("image");
@@ -254,10 +327,31 @@ export function classifyVisionModels(models: ProviderModel[]): ProviderModel[] {
     (model) =>
       model.inputModalities.some((modality) =>
         /image|vision|multimodal/i.test(modality),
-      ) || /vision|multimodal|\bvl\b|image|llava|pixtral|internvl|moondream|minicpm-v|gemma-3|gpt-4o|claude-3|glm-4v|qwen.*-vl|llama.*vision/i.test(
+      ) ||
+      /vision|multimodal|\bvl\b|image|llava|pixtral|internvl|moondream|minicpm-v|gemma-3|gpt-4o|claude-3|glm-4v|qwen.*-vl|llama.*vision/i.test(
         `${model.id} ${model.name} ${model.description}`,
       ),
   );
+}
+
+function mergeModels(
+  primary: ProviderModel[],
+  extra: ProviderModel[],
+): ProviderModel[] {
+  const byId = new Map(primary.map((model) => [model.id, model]));
+  for (const model of extra) if (!byId.has(model.id)) byId.set(model.id, model);
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function isCloudflareEndpoint(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return /(^|\.)cloudflare\.com$|(^|\.)workers\.dev$|(^|\.)pages\.dev$/i.test(
+      url.hostname,
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function classifyCodingModels(models: ProviderModel[]): ProviderModel[] {

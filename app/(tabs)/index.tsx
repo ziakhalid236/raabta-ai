@@ -254,6 +254,7 @@ export default function HomeScreen() {
   const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
   const [accountsNotice, setAccountsNotice] = useState("");
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
+  const [moreMenuVisible, setMoreMenuVisible] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [showError, setShowError] = useState("");
@@ -1885,21 +1886,6 @@ export default function HomeScreen() {
       ],
     );
   }
-  const navItems: { id: Panel; icon: IconName; label: string }[] = [
-    {
-      id: "chat",
-      icon: "chatbubble-ellipses-outline",
-      label: t("Chat", "چیٹ"),
-    },
-    { id: "history", icon: "time-outline", label: t("History", "تاریخ") },
-    { id: "roadmap", icon: "map-outline", label: t("Roadmap", "مراحل") },
-    {
-      id: "settings",
-      icon: "settings-outline",
-      label: t("Settings", "ترتیبات"),
-    },
-  ];
-
   return (
     <SafeAreaView
       style={[
@@ -1923,14 +1909,9 @@ export default function HomeScreen() {
                 onPress={startNewChat}
               />
               <IconButton
-                icon="time-outline"
-                label={t("Chat history", "گفتگوؤں کی فہرست")}
-                onPress={() => setPanel("history")}
-              />
-              <IconButton
-                icon="settings-outline"
-                label={t("Settings", "ترتیبات")}
-                onPress={openSettings}
+                icon="ellipsis-horizontal"
+                label={t("More pages and settings", "مزید صفحات اور ترتیبات")}
+                onPress={() => setMoreMenuVisible(true)}
               />
             </View>
           </View>
@@ -3160,37 +3141,117 @@ export default function HomeScreen() {
           { paddingBottom: Math.max(insets.bottom, 8) },
         ]}
       >
-        {navItems.map((item) => {
-          const selected = item.id === panel;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              key={item.id}
-              onPress={() => {
-                if (item.id === "settings") openSettings();
-                else setPanel(item.id);
-              }}
-              style={styles.navItem}
-            >
-              <Ionicons
-                name={item.icon}
-                size={20}
-                color={selected ? C.teal : C.muted}
-              />
-              <Text
-                style={[
-                  styles.navLabel,
-                  styles.autoDirection,
-                  selected && styles.navLabelSelected,
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: panel === "chat" }}
+          onPress={() => setPanel("chat")}
+          style={styles.navItem}
+        >
+          <Ionicons
+            name="chatbubble-ellipses-outline"
+            size={20}
+            color={panel === "chat" ? C.teal : C.muted}
+          />
+          <Text
+            style={[
+              styles.navLabel,
+              panel === "chat" && styles.navLabelSelected,
+            ]}
+          >
+            {t("Chat", "چیٹ")}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t(
+            "More pages and settings",
+            "مزید صفحات اور ترتیبات",
+          )}
+          onPress={() => setMoreMenuVisible(true)}
+          style={styles.navItem}
+        >
+          <Ionicons
+            name="ellipsis-horizontal-circle-outline"
+            size={21}
+            color={moreMenuVisible ? C.teal : C.muted}
+          />
+          <Text
+            style={[
+              styles.navLabel,
+              moreMenuVisible && styles.navLabelSelected,
+            ]}
+          >
+            {t("More", "مزید")}
+          </Text>
+        </Pressable>
+      </View>
+      <Modal
+        visible={moreMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMoreMenuVisible(false)}
+      >
+        <Pressable
+          style={styles.moreMenuBackdrop}
+          onPress={() => setMoreMenuVisible(false)}
+        >
+          <Pressable
+            style={styles.moreMenu}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={styles.moreMenuHandle} />
+            <Text style={styles.moreMenuTitle}>
+              {t("Raabta pages", "رابطہ کے صفحات")}
+            </Text>
+            {[
+              {
+                id: "history" as Panel,
+                icon: "time-outline" as IconName,
+                en: "History",
+                ur: "تاریخ",
+              },
+              {
+                id: "research" as Panel,
+                icon: "globe-outline" as IconName,
+                en: "Research & media",
+                ur: "تحقیق اور میڈیا",
+              },
+              {
+                id: "roadmap" as Panel,
+                icon: "map-outline" as IconName,
+                en: "Roadmap",
+                ur: "مراحل",
+              },
+              {
+                id: "settings" as Panel,
+                icon: "settings-outline" as IconName,
+                en: "Settings",
+                ur: "ترتیبات",
+              },
+            ].map((item) => (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                onPress={() => {
+                  setMoreMenuVisible(false);
+                  if (item.id === "settings") openSettings();
+                  else setPanel(item.id);
+                }}
+                style={({ pressed }) => [
+                  styles.moreMenuItem,
+                  pressed && styles.pressed,
                 ]}
               >
-                {item.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+                <View style={styles.moreMenuIcon}>
+                  <Ionicons name={item.icon} size={19} color={C.teal} />
+                </View>
+                <Text style={styles.moreMenuLabel}>{t(item.en, item.ur)}</Text>
+                <Ionicons name="chevron-forward" size={17} color={C.muted} />
+              </Pressable>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
       <AccountsSheet
         key={accountsVisible ? "open" : "closed"}
         visible={accountsVisible}
@@ -5026,5 +5087,52 @@ const styles = StyleSheet.create({
   },
   storageLabel: { color: C.muted, fontSize: 11 },
   storageValue: { color: C.ink, fontSize: 11, fontWeight: "700" },
+  moreMenuBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(20, 31, 29, 0.28)",
+  },
+  moreMenu: {
+    gap: 4,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 28,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    backgroundColor: C.paper,
+    borderTopWidth: 1,
+    borderColor: C.line,
+  },
+  moreMenuHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    marginBottom: 8,
+    borderRadius: 3,
+    backgroundColor: "#C8D0CC",
+  },
+  moreMenuTitle: {
+    marginBottom: 6,
+    color: C.ink,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  moreMenuItem: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+  },
+  moreMenuIcon: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: C.tealPale,
+  },
+  moreMenuLabel: { flex: 1, color: C.ink, fontSize: 14, fontWeight: "600" },
   divider: { height: 1, backgroundColor: C.line, marginVertical: 5 },
 });

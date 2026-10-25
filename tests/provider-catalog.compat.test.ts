@@ -5,14 +5,15 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("OpenAI-compatible model catalog", () => {
   it("accepts model entries with an id but no display name or AI provider metadata", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      new Response(
-        JSON.stringify({
-          object: "list",
-          data: [{ id: "local/qwen-7b", object: "model" }],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [{ id: "local/qwen-7b", object: "model" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -73,5 +74,31 @@ describe("OpenAI-compatible model catalog", () => {
       "provider/vision-model",
       "qwen2.5-vl-7b-instruct",
     ]);
+  });
+
+  it("shows Cloudflare's documented vision choices when /models omits modality metadata", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify({ data: [{ id: "@cf/meta/llama-3.1-8b-instruct" }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const catalog = await discoverProviderModels(
+      "secret",
+      undefined,
+      "https://api.cloudflare.com/client/v4/accounts/test/ai/v1",
+    );
+
+    expect(catalog.visionModels.map((model) => model.id)).toContain(
+      "@cf/moondream/moondream3.1-9B-A2B",
+    );
+    expect(
+      catalog.visionModels.every((model) =>
+        model.inputModalities.includes("image"),
+      ),
+    ).toBe(true);
   });
 });
