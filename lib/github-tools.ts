@@ -17,6 +17,15 @@ export type GitHubRepositoryFile = {
   downloadUrl: string;
 };
 export type GitHubWriteResult = { url: string; message: string; sha?: string };
+export type GitHubWorkflowRun = {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  branch: string;
+  url: string;
+  createdAt: string;
+};
 const API = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 export class GitHubToolError extends Error {
@@ -178,6 +187,86 @@ export async function createGitHubPullRequest(args: {
     url: typeof payload?.html_url === "string" ? payload.html_url : "",
     message: "Pull request created. Merge still requires approval.",
   };
+}
+
+export async function createGitHubBranch(args: {
+  token: string;
+  repository: string;
+  branch: string;
+  fromBranch?: string;
+  signal?: AbortSignal;
+}): Promise<GitHubWriteResult> {
+  const source = args.fromBranch ?? "main";
+  const refResponse = await githubFetch(
+    `/repos/${encodeRepository(args.repository)}/git/ref/heads/${encodeURIComponent(source)}`,
+    args.token,
+    args.signal,
+  );
+  const ref: any = await refResponse.json().catch(() => null);
+  const sha = typeof ref?.object?.sha === "string" ? ref.object.sha : "";
+  if (!sha) throw new GitHubToolError("GitHub returned no source commit for that branch.");
+  const response = await githubWrite(
+    `/repos/${encodeRepository(args.repository)}/git/refs`,
+    args.token,
+    { ref: `refs/heads/${args.branch}`, sha },
+    args.signal,
+  );
+  const payload: any = await response.json().catch(() => null);
+  return {
+    url: `https://github.com/${args.repository}/tree/${encodeURIComponent(args.branch)}`,
+    message: "Branch created by the connected GitHub tool.",
+    sha: payload?.object?.sha,
+  };
+}
+
+export async function dispatchGitHubWorkflow(args: {
+  token: string;
+  repository: string;
+  workflow: string;
+  ref: string;
+  inputs?: Record<string, string>;
+  signal?: AbortSignal;
+}): Promise<GitHubWriteResult> {
+  await githubWrite(
+    `/repos/${encodeRepository(args.repository)}/actions/workflows/${encodeURIComponent(args.workflow)}/dispatches`,
+    args.token,
+    { ref: args.ref, inputs: args.inputs ?? {} },
+    args.signal,
+  );
+  return {
+    url: `https://github.com/${args.repository}/actions/workflows/${encodeURIComponent(args.workflow)}`,
+    message: "GitHub Actions workflow dispatched. Use workflow-run inspection to monitor it.",
+  };
+}
+
+export async function listGitHubWorkflowRuns(
+  token: string,
+  repository: string,
+  workflow?: string,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun[]> {
+  const suffix = workflow
+    ? `/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=20`
+    : "/actions/runs?per_page=20";
+  const response = await githubFetch(
+    `/repos/${encodeRepository(repository)}${suffix}`,
+    token,
+    signal,
+  );
+  const payload: any = await response.json().catch(() => null);
+  const runs = Array.isArray(payload?.workflow_runs) ? payload.workflow_runs : [];
+  return runs.flatMap((run: any) => {
+    if (typeof run?.id !== "number") return [];
+    return [{
+      id: run.id,
+      name: typeof run.name === "string" ? run.name : "GitHub Actions",
+      status: typeof run.status === "string" ? run.status : "unknown",
+      conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
+      branch: typeof run.head_branch === "string" ? run.head_branch : "",
+      url: typeof run.html_url === "string" ? run.html_url : "",
+      createdAt: typeof run.created_at === "string" ? run.created_at : "",
+    } satisfies GitHubWorkflowRun];
+  });
 }
 async function githubFetch(
   path: string,

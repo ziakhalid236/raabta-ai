@@ -1,4 +1,4 @@
-export const DEFAULT_PROVIDER_BASE_URL = "https://openrouter.ai/api/v1";
+export const DEFAULT_PROVIDER_BASE_URL = "";
 
 export function normalizeProviderBaseUrl(value: string): string {
   try {

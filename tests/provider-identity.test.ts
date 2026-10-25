@@ -7,7 +7,7 @@ describe("provider key endpoint binding", () => {
   });
 
   it("does not treat a saved key as portable to another endpoint or path", () => {
-    expect(sameProviderEndpoint("https://openrouter.ai/api/v1", "https://codeflow.example/api/v1")).toBe(false);
+    expect(sameProviderEndpoint("https://alpha.example/v1", "https://codeflow.example/v1")).toBe(false);
     expect(sameProviderEndpoint("https://api.example.test/v1", "https://api.example.test/other/v1")).toBe(false);
     expect(sameProviderEndpoint("http://api.example.test/v1", "http://api.example.test/v1")).toBe(false);
     expect(sameProviderEndpoint("", "https://api.example.test/v1")).toBe(false);

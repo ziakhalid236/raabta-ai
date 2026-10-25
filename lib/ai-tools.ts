@@ -212,6 +212,60 @@ const GITHUB_TOOLS: AiToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "github_create_branch",
+      description:
+        "Create an isolated branch from an existing branch in a connected GitHub repository. The app asks the user to approve before writing.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          branch: string("New branch name"),
+          fromBranch: string("Optional source branch; defaults to main"),
+        },
+        required: ["repository", "branch"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_dispatch_workflow",
+      description:
+        "Start an existing GitHub Actions workflow on a selected branch. The app asks the user to approve before dispatching it.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          workflow: string("Workflow file name, for example engineering-checks.yml"),
+          ref: string("Branch or tag to run the workflow on"),
+          inputs: string("Optional JSON object of workflow_dispatch inputs"),
+        },
+        required: ["repository", "workflow", "ref"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "github_list_workflow_runs",
+      description:
+        "List recent GitHub Actions runs for a connected repository or a specific workflow.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          workflow: string("Optional workflow file name"),
+        },
+        required: ["repository"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 export function getLiveToolDefinitions(options: {

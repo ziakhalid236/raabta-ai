@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { discoverOpenRouterModels } from "../lib/openrouter";
+import { discoverProviderModels } from "../lib/provider-catalog";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("OpenAI-compatible model catalog", () => {
-  it("accepts model entries with an id but no display name or OpenRouter metadata", async () => {
+  it("accepts model entries with an id but no display name or AI provider metadata", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
       new Response(
         JSON.stringify({
@@ -16,7 +16,7 @@ describe("OpenAI-compatible model catalog", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const catalog = await discoverOpenRouterModels(
+    const catalog = await discoverProviderModels(
       "secret",
       undefined,
       "https://codeflow.example/v1",
@@ -40,7 +40,7 @@ describe("OpenAI-compatible model catalog", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      discoverOpenRouterModels("secret", undefined, "http://192.168.1.4:8080/v1"),
+      discoverProviderModels("secret", undefined, "http://192.168.1.4:8080/v1"),
     ).rejects.toThrow(/HTTPS/);
     expect(fetchMock).not.toHaveBeenCalled();
   });

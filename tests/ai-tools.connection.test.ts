@@ -21,6 +21,9 @@ describe("connection-aware live tools", () => {
     expect(names).toContain("github_update_file");
     expect(names).toContain("github_create_issue");
     expect(names).toContain("github_create_pull_request");
+    expect(names).toContain("github_create_branch");
+    expect(names).toContain("github_dispatch_workflow");
+    expect(names).toContain("github_list_workflow_runs");
     expect(names).not.toContain("github_delete_repository");
     expect(names).not.toContain("github_merge_pull_request");
   });

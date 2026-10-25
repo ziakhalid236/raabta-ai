@@ -13,10 +13,8 @@ export type ChatToolCallExecutor = (
   args: Record<string, unknown>,
 ) => Promise<string>;
 
-const DEFAULT_CHAT_COMPLETIONS_URL =
-  "https://openrouter.ai/api/v1/chat/completions";
-const AUDIO_TRANSCRIPTIONS_URL =
-  "https://openrouter.ai/api/v1/audio/transcriptions";
+const DEFAULT_CHAT_COMPLETIONS_URL = "";
+const AUDIO_TRANSCRIPTIONS_URL = "";
 
 export class AIRequestError extends Error {
   constructor(
@@ -28,7 +26,7 @@ export class AIRequestError extends Error {
   }
 }
 
-/** Send only user/assistant content to the fixed OpenRouter chat-completions route. */
+/** Send only user/assistant content to the configured OpenAI-compatible chat route. */
 export async function requestChatCompletion(args: {
   modelId: string;
   apiKey: string;
@@ -38,7 +36,7 @@ export async function requestChatCompletion(args: {
   tools?: unknown[];
   executeTool?: ChatToolCallExecutor;
 }): Promise<string> {
-  const chatUrl = `${(args.baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "")}/chat/completions`;
+  const chatUrl = `${(args.baseUrl ?? "").replace(/\/$/, "")}/chat/completions`;
   const messages = [...args.messages] as Array<Record<string, unknown>>;
   const completedToolActions = new Map<string, string>();
   const maxToolRounds = 8;
@@ -46,6 +44,8 @@ export async function requestChatCompletion(args: {
   for (let round = 0; round < maxToolRounds; round += 1) {
     let response: Response;
     try {
+      if (!/^https:\/\//i.test(chatUrl))
+        throw new AIRequestError("Configure an HTTPS OpenAI-compatible provider endpoint first.");
       response = await fetch(chatUrl || DEFAULT_CHAT_COMPLETIONS_URL, {
         method: "POST",
         headers: {
@@ -232,12 +232,13 @@ export async function requestChatCompletion(args: {
   );
 }
 
-/** Send a user-selected or recorded audio file to OpenRouter speech transcription. */
+/** Send a user-selected or recorded audio file to the configured speech endpoint. */
 export async function requestAudioTranscription(args: {
   modelId: string;
   apiKey: string;
   file: { uri: string; name: string; mimeType: string; webFile?: Blob };
   signal: AbortSignal;
+  baseUrl: string;
 }): Promise<string> {
   const form = new FormData();
   form.append("model", args.modelId.trim());
@@ -253,7 +254,10 @@ export async function requestAudioTranscription(args: {
 
   let response: Response;
   try {
-    response = await fetch(AUDIO_TRANSCRIPTIONS_URL, {
+    const transcriptionUrl = `${args.baseUrl.replace(/\/$/, "")}/audio/transcriptions`;
+    if (!/^https:\/\//i.test(transcriptionUrl))
+      throw new AIRequestError("Configure an HTTPS provider endpoint with audio transcription support first.");
+    response = await fetch(transcriptionUrl || AUDIO_TRANSCRIPTIONS_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${args.apiKey}` },
       body: form,
@@ -262,7 +266,7 @@ export async function requestAudioTranscription(args: {
   } catch (error) {
     if (args.signal.aborted) throw error;
     throw new AIRequestError(
-      "Could not reach OpenRouter speech transcription. Check your connection and selected transcription model.",
+      "Could not reach AI provider speech transcription. Check your connection and selected transcription model.",
     );
   }
   const payload: unknown = await response.json().catch(() => null);
@@ -275,7 +279,7 @@ export async function requestAudioTranscription(args: {
       : "";
   if (!text)
     throw new AIRequestError(
-      "OpenRouter returned no readable transcription text. Check the selected speech model.",
+      "AI provider returned no readable transcription text. Check the selected speech model.",
     );
   return text;
 }
@@ -291,7 +295,7 @@ function responseError(status: number): AIRequestError {
   };
   return new AIRequestError(
     messages[status] ??
-      `OpenRouter returned HTTP ${status}. Check the selected model, file compatibility, and account status.`,
+      `AI provider returned HTTP ${status}. Check the selected model, file compatibility, and account status.`,
     status,
   );
 }

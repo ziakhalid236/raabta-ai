@@ -65,16 +65,19 @@ import {
   writeApiKey,
 } from "@/lib/secure-credentials";
 import {
-  discoverOpenRouterModels,
-  type OpenRouterCatalog,
-  type OpenRouterModel,
-} from "@/lib/openrouter";
+  discoverProviderModels,
+  type ProviderCatalog,
+  type ProviderModel,
+} from "@/lib/provider-catalog";
 import { fetchGitHubProfile, type GitHubProfile } from "@/lib/github-account";
 import {
+  createGitHubBranch,
   createGitHubIssue,
   createGitHubPullRequest,
+  dispatchGitHubWorkflow,
   listGitHubRepositories,
   listGitHubRepositoryFiles,
+  listGitHubWorkflowRuns,
   readGitHubFile,
   updateGitHubFile,
   type GitHubRepository,
@@ -175,14 +178,14 @@ export default function HomeScreen() {
   const [keyVisible, setKeyVisible] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasKey, setHasKey] = useState(false);
-  const [openRouterConnected, setOpenRouterConnected] = useState(false);
+  const [providerConnected, setProviderConnected] = useState(false);
   const isProviderDraftConnected =
-    openRouterConnected &&
+    providerConnected &&
     sameProviderEndpoint(
       preferences.providerKeyBaseUrl,
       providerBaseUrlDraft.trim() || preferences.providerBaseUrl,
     );
-  const [modelCatalog, setModelCatalog] = useState<OpenRouterCatalog | null>(
+  const [modelCatalog, setModelCatalog] = useState<ProviderCatalog | null>(
     null,
   );
   const [modelPickerKind, setModelPickerKind] = useState<
@@ -248,8 +251,8 @@ export default function HomeScreen() {
         setPreferences(storedPreferences);
         setProviderBaseUrlDraft(storedPreferences.providerBaseUrl);
         setHasKey(Boolean(apiKey));
-        setOpenRouterConnected(
-          Boolean(apiKey && storedPreferences.openRouterConnected),
+        setProviderConnected(
+          Boolean(apiKey && storedPreferences.providerConnected),
         );
         setGithubProfile(
           githubToken && storedPreferences.githubLogin
@@ -330,7 +333,7 @@ export default function HomeScreen() {
       return;
     setShowError("");
     if (
-      !openRouterConnected ||
+      !providerConnected ||
       !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl) ||
       !preferences.modelId.trim() ||
       !hasKey
@@ -479,8 +482,11 @@ export default function HomeScreen() {
               "update and commit a file (requires approval)",
               "create an issue (requires approval)",
               "open a pull request (requires approval)",
+              "create an isolated branch (requires approval)",
+              "dispatch an existing workflow (requires approval)",
+              "inspect workflow runs",
             ],
-            unavailableActions: ["delete repositories", "merge pull requests", "run workflows"],
+            unavailableActions: ["delete repositories", "merge pull requests", "arbitrary shell execution"],
           })
         : "";
       const executeToolAction = async (
@@ -593,6 +599,46 @@ export default function HomeScreen() {
               signal: controller.signal,
             }),
           );
+        if (name === "github_create_branch")
+          return JSON.stringify(
+            await createGitHubBranch({
+              token: githubToken,
+              repository: String(args.repository),
+              branch: String(args.branch),
+              fromBranch: typeof args.fromBranch === "string" ? args.fromBranch : undefined,
+              signal: controller.signal,
+            }),
+          );
+        if (name === "github_dispatch_workflow") {
+          let inputs: Record<string, string> | undefined;
+          if (typeof args.inputs === "string" && args.inputs.trim()) {
+            const parsed: unknown = JSON.parse(args.inputs);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+              throw new Error("Workflow inputs must be a JSON object.");
+            inputs = Object.fromEntries(
+              Object.entries(parsed).map(([key, value]) => [key, String(value)]),
+            );
+          }
+          return JSON.stringify(
+            await dispatchGitHubWorkflow({
+              token: githubToken,
+              repository: String(args.repository),
+              workflow: String(args.workflow),
+              ref: String(args.ref),
+              inputs,
+              signal: controller.signal,
+            }),
+          );
+        }
+        if (name === "github_list_workflow_runs")
+          return JSON.stringify(
+            await listGitHubWorkflowRuns(
+              githubToken,
+              String(args.repository),
+              typeof args.workflow === "string" ? args.workflow : undefined,
+              controller.signal,
+            ),
+          );
         return `Tool ${name} is not available. Delete, merge and deploy are approval-gated and are not autonomous tools.`;
       };
       const executeTool = async (
@@ -614,6 +660,9 @@ export default function HomeScreen() {
           github_update_file: ["Preparing a GitHub file update", "GitHub فائل کی تبدیلی تیار ہو رہی ہے"],
           github_create_issue: ["Preparing a GitHub issue", "GitHub issue تیار ہو رہا ہے"],
           github_create_pull_request: ["Preparing a GitHub pull request", "GitHub pull request تیار ہو رہی ہے"],
+          github_create_branch: ["Preparing an isolated GitHub branch", "الگ GitHub branch تیار ہو رہی ہے"],
+          github_dispatch_workflow: ["Preparing a GitHub Actions run", "GitHub Actions run تیار ہو رہا ہے"],
+          github_list_workflow_runs: ["Inspecting GitHub Actions runs", "GitHub Actions runs دیکھی جا رہی ہیں"],
         };
         const [englishLabel, urduLabel] = labels[name] ?? [
           `Running ${name}`,
@@ -627,6 +676,8 @@ export default function HomeScreen() {
           name === "github_update_file" ||
           name === "github_create_issue" ||
           name === "github_create_pull_request" ||
+          name === "github_create_branch" ||
+          name === "github_dispatch_workflow" ||
           name === "ai_workspace_delete_file";
         updateThread(currentThread.id, (thread) => ({
           ...thread,
@@ -661,9 +712,13 @@ export default function HomeScreen() {
                 ? `Delete ${path} from the private AI workspace`
                 : name === "github_update_file"
                 ? `Commit ${path} in ${repo}`
-                : name === "github_create_issue"
+                  : name === "github_create_issue"
                   ? `Create issue in ${repo}: ${String(args.title ?? "")}`
-                  : `Open pull request in ${repo}: ${String(args.title ?? "")}`;
+                  : name === "github_create_pull_request"
+                    ? `Open pull request in ${repo}: ${String(args.title ?? "")}`
+                    : name === "github_create_branch"
+                      ? `Create branch ${String(args.branch ?? "")} in ${repo}`
+                      : `Dispatch workflow ${String(args.workflow ?? "")} on ${repo}`;
             const approved = await requestSensitiveActionApproval(summary);
             if (!approved) {
               const cancelled = t(
@@ -849,16 +904,15 @@ export default function HomeScreen() {
 
   async function transcribeAudioFile(file: LocalAudioFile) {
     if (
-      !openRouterConnected ||
-      !sameProviderEndpoint(preferences.providerBaseUrl, DEFAULT_PROVIDER_BASE_URL) ||
-      !sameProviderEndpoint(preferences.providerKeyBaseUrl, DEFAULT_PROVIDER_BASE_URL) ||
+      !providerConnected ||
+      !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl) ||
       !preferences.transcriptionModelId ||
       !hasKey
     ) {
       setShowError(
         t(
-          "Connect OpenRouter and choose a transcription model in Settings before using voice input.",
-          "آواز استعمال کرنے سے پہلے Settings میں OpenRouter جوڑیں اور transcription model منتخب کریں۔",
+          "Connect AI provider and choose a transcription model in Settings before using voice input.",
+          "آواز استعمال کرنے سے پہلے Settings میں AI provider جوڑیں اور transcription model منتخب کریں۔",
         ),
       );
       setPanel("settings");
@@ -927,6 +981,7 @@ export default function HomeScreen() {
         apiKey,
         file,
         signal: controller.signal,
+        baseUrl: preferences.providerBaseUrl,
       });
       const completedAt = new Date().toISOString();
       updateThread(currentThread.id, (thread) => ({
@@ -1014,14 +1069,14 @@ export default function HomeScreen() {
         return;
       }
       if (
-        !openRouterConnected ||
+        !providerConnected ||
         !preferences.transcriptionModelId ||
         !hasKey
       ) {
         setShowError(
           t(
-            "Connect OpenRouter and choose a transcription model in Settings before recording.",
-            "ریکارڈنگ سے پہلے Settings میں OpenRouter جوڑیں اور transcription model منتخب کریں۔",
+            "Connect AI provider and choose a transcription model in Settings before recording.",
+            "ریکارڈنگ سے پہلے Settings میں AI provider جوڑیں اور transcription model منتخب کریں۔",
           ),
         );
         setPanel("settings");
@@ -1057,7 +1112,7 @@ export default function HomeScreen() {
     }
   }
 
-  async function connectOpenRouter() {
+  async function connectProvider() {
     if (isTestingConnection) return;
     const providerBaseUrl = (
       providerBaseUrlDraft.trim() ||
@@ -1067,7 +1122,7 @@ export default function HomeScreen() {
     let candidateKey = keyDraft.trim();
     if (
       !candidateKey &&
-      preferences.openRouterConnected &&
+      preferences.providerConnected &&
       sameProviderEndpoint(preferences.providerKeyBaseUrl, providerBaseUrl)
     ) {
       try {
@@ -1092,7 +1147,7 @@ export default function HomeScreen() {
     setIsTestingConnection(true);
     setSettingsNotice("");
     try {
-      const catalog = await discoverOpenRouterModels(
+      const catalog = await discoverProviderModels(
         candidateKey,
         undefined,
         providerBaseUrl,
@@ -1106,13 +1161,13 @@ export default function HomeScreen() {
       // Bind the key to this endpoint only after the model catalog succeeds.
       await writeApiKey(candidateKey);
       setHasKey(true);
-      setOpenRouterConnected(true);
+      setProviderConnected(true);
       setKeyDraft("");
       setKeyVisible(false);
       setModelCatalog(catalog);
       const nextPreferences = {
         ...preferences,
-        openRouterConnected: true,
+        providerConnected: true,
         providerBaseUrl,
         providerKeyBaseUrl: providerBaseUrl,
         modelId: selectedChat?.id ?? "",
@@ -1145,10 +1200,10 @@ export default function HomeScreen() {
   }
 
   function refreshModelCatalog() {
-    void connectOpenRouter();
+    void connectProvider();
   }
 
-  async function selectChatModel(model: OpenRouterModel) {
+  async function selectChatModel(model: ProviderModel) {
     const nextPreferences = {
       ...preferences,
       modelId: model.id,
@@ -1164,7 +1219,7 @@ export default function HomeScreen() {
     }
   }
 
-  async function selectTranscriptionModel(model: OpenRouterModel) {
+  async function selectTranscriptionModel(model: ProviderModel) {
     const nextPreferences = {
       ...preferences,
       transcriptionModelId: model.id,
@@ -1260,13 +1315,13 @@ export default function HomeScreen() {
     try {
       await deleteApiKey();
       setHasKey(false);
-      setOpenRouterConnected(false);
+      setProviderConnected(false);
       setModelCatalog(null);
       setKeyDraft("");
       setKeyVisible(false);
       const nextPreferences = {
         ...preferences,
-        openRouterConnected: false,
+        providerConnected: false,
         providerKeyBaseUrl: "",
         modelId: "",
         modelName: "",
@@ -1359,12 +1414,12 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityLabel={t("Choose chat model", "چیٹ ماڈل منتخب کریں")}
               onPress={() => {
-                if (!openRouterConnected) {
+                if (!providerConnected) {
                   openSettings();
                   return;
                 }
                 setModelPickerKind("chat");
-                if (!modelCatalog) void connectOpenRouter();
+                if (!modelCatalog) void connectProvider();
               }}
               style={styles.modelBadge}
             >
@@ -1453,12 +1508,12 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.flex}>
                     <Text style={styles.setupTitle}>
-                      {openRouterConnected && preferences.modelId
+                      {providerConnected && preferences.modelId
                         ? t("Connection ready", "کنکشن تیار ہے")
                         : t("Connect your model", "اپنا ماڈل جوڑیں")}
                     </Text>
                     <Text style={styles.setupSubtitle}>
-                      {openRouterConnected && preferences.modelId
+                      {providerConnected && preferences.modelId
                         ? t(
                             "Tap to change the model or review your connection",
                             "ماڈل بدلنے یا کنکشن دیکھنے کے لیے کھولیں",
@@ -2054,8 +2109,8 @@ export default function HomeScreen() {
           <FieldLabel
             title={t("Provider API base URL", "Provider API base URL")}
             subtitle={t(
-              "OpenRouter is the default. Use an HTTPS OpenAI-compatible /v1 base URL; the key stays bound to that endpoint.",
-              "OpenRouter پہلے سے منتخب ہے۔ HTTPS OpenAI-compatible /v1 base URL دیں؛ key اسی endpoint سے منسلک رہتی ہے۔",
+              "AI provider is the default. Use an HTTPS OpenAI-compatible /v1 base URL; the key stays bound to that endpoint.",
+              "AI provider پہلے سے منتخب ہے۔ HTTPS OpenAI-compatible /v1 base URL دیں؛ key اسی endpoint سے منسلک رہتی ہے۔",
             )}
           />
           <TextInput
@@ -2064,7 +2119,7 @@ export default function HomeScreen() {
             autoCorrect={false}
             value={providerBaseUrlDraft}
             onChangeText={setProviderBaseUrlDraft}
-            placeholder="https://openrouter.ai/api/v1"
+            placeholder="https://your-provider.example/v1"
             placeholderTextColor="#9AA29E"
             style={[styles.fieldInput, styles.autoDirection]}
           />
@@ -2170,7 +2225,7 @@ export default function HomeScreen() {
             accessibilityRole="button"
             accessibilityState={{ disabled: isTestingConnection }}
             disabled={isTestingConnection}
-            onPress={() => void connectOpenRouter()}
+            onPress={() => void connectProvider()}
             style={({ pressed }) => [
               styles.primaryButton,
               isTestingConnection && styles.primaryButtonDisabled,
@@ -2192,25 +2247,6 @@ export default function HomeScreen() {
                 : t("Connect & load models", "منسلک کریں اور ماڈلز لوڈ کریں")}
             </Text>
           </Pressable>
-          {(providerBaseUrlDraft || preferences.providerBaseUrl).includes(
-            "openrouter.ai",
-          ) ? (
-            <Pressable
-              accessibilityRole="link"
-              onPress={() =>
-                void Linking.openURL("https://openrouter.ai/keys").catch(
-                  () => undefined,
-                )
-              }
-              style={styles.toolChip}
-            >
-              <Ionicons name="open-outline" size={14} color={C.teal} />
-              <Text style={styles.toolChipText}>
-                {t("Get or manage an OpenRouter key", "OpenRouter key حاصل یا منظم کریں")}
-              </Text>
-            </Pressable>
-          ) : null}
-
           <FieldLabel
             title={t("Chat model", "چیٹ ماڈل")}
             subtitle={t(
@@ -2231,7 +2267,7 @@ export default function HomeScreen() {
                 return;
               }
               setModelPickerKind("chat");
-              if (!modelCatalog) void connectOpenRouter();
+              if (!modelCatalog) void connectProvider();
             }}
             style={[
               styles.researchCard,
@@ -2281,8 +2317,8 @@ export default function HomeScreen() {
           <FieldLabel
             title={t("Voice transcription · optional", "آواز کا متن · اختیاری")}
             subtitle={t(
-              "Uses the same OpenRouter key, with a model listed for transcription.",
-              "اسی OpenRouter key سے transcription کے لیے درج ماڈل استعمال ہوتا ہے۔",
+              "Uses the same AI provider key, with a model listed for transcription.",
+              "اسی AI provider key سے transcription کے لیے درج ماڈل استعمال ہوتا ہے۔",
             )}
           />
           <Pressable
@@ -2290,19 +2326,18 @@ export default function HomeScreen() {
             onPress={() => {
               if (
                 !isProviderDraftConnected ||
-                !sameProviderEndpoint(preferences.providerBaseUrl, DEFAULT_PROVIDER_BASE_URL) ||
-                !sameProviderEndpoint(preferences.providerKeyBaseUrl, DEFAULT_PROVIDER_BASE_URL)
+                !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl)
               ) {
                 setSettingsNotice(
                   t(
-                    "Voice transcription currently requires a connected OpenRouter endpoint and its matching key.",
-                    "آواز کی transcription کے لیے OpenRouter endpoint اور اسی سے منسلک key درکار ہے۔",
+                    "Voice transcription currently requires a connected AI provider endpoint and its matching key.",
+                    "آواز کی transcription کے لیے AI provider endpoint اور اسی سے منسلک key درکار ہے۔",
                   ),
                 );
                 return;
               }
               setModelPickerKind("transcription");
-              if (!modelCatalog) void connectOpenRouter();
+              if (!modelCatalog) void connectProvider();
             }}
             style={[
               styles.researchCard,
@@ -2408,7 +2443,7 @@ export default function HomeScreen() {
         key={accountsVisible ? "open" : "closed"}
         visible={accountsVisible}
         language={preferences.language}
-        openRouterConnected={openRouterConnected}
+        providerConnected={providerConnected}
         selectedModelName={preferences.modelName}
         githubProfile={githubProfile}
         repositoryCount={githubRepositories.length}
@@ -2418,7 +2453,7 @@ export default function HomeScreen() {
         connecting={isConnectingGitHub}
         status={accountsNotice}
         onClose={() => setAccountsVisible(false)}
-        onManageOpenRouter={() => {
+        onManageProvider={() => {
           setAccountsVisible(false);
           openSettings();
         }}

@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import type { OpenRouterModel } from "@/lib/openrouter";
+import type { ProviderModel } from "@/lib/provider-catalog";
 
 const C = {
   paper: "#F7F7F3",
@@ -42,13 +42,13 @@ export function ModelPicker({
   visible: boolean;
   language: "ur" | "en";
   kind: ModelKind;
-  models: OpenRouterModel[];
+  models: ProviderModel[];
   selectedModelId: string;
   loading?: boolean;
   message?: string;
   onClose: () => void;
   onRefresh: () => void;
-  onSelect: (model: OpenRouterModel) => void;
+  onSelect: (model: ProviderModel) => void;
 }) {
   const t = (english: string, urdu: string) => language === "ur" ? urdu : english;
   const [query, setQuery] = useState("");
@@ -69,7 +69,7 @@ export function ModelPicker({
   const title = kind === "chat" ? t("Choose a chat model", "چیٹ ماڈل منتخب کریں") : t("Choose a voice model", "آواز کا ماڈل منتخب کریں");
   const subtitle = kind === "chat"
     ? t("Names and capabilities from your loaded provider catalog", "آپ کے provider کی فہرست سے ماڈل نام اور صلاحیتیں")
-    : t("Models returned for OpenRouter speech transcription", "OpenRouter سے دستیاب آواز کی transcription کے ماڈلز");
+    : t("Models returned for AI provider speech transcription", "AI provider سے دستیاب آواز کی transcription کے ماڈلز");
 
   return (
     <Modal

@@ -31,7 +31,7 @@ export type ChatThread = {
 
 export type ChatPreferences = {
   language: "ur" | "en";
-  openRouterConnected: boolean;
+  providerConnected: boolean;
   providerBaseUrl: string;
   providerKeyBaseUrl: string;
   modelId: string;
@@ -54,7 +54,7 @@ const LEGACY_PREFERENCES_KEYS = [
 
 export const DEFAULT_PREFERENCES: ChatPreferences = {
   language: "en",
-  openRouterConnected: false,
+  providerConnected: false,
   providerBaseUrl: DEFAULT_PROVIDER_BASE_URL,
   providerKeyBaseUrl: "",
   modelId: "",
@@ -115,16 +115,16 @@ export async function loadPreferences(): Promise<ChatPreferences> {
     const providerKeyBaseUrl = isCurrentSchema
       ? typeof data.providerKeyBaseUrl === "string" && data.providerKeyBaseUrl.trim()
         ? data.providerKeyBaseUrl.trim().replace(/\/$/, "")
-        : data.openRouterConnected === true
+        : data.providerConnected === true
           ? providerBaseUrl
           : ""
       : "";
     return {
       language: data.language === "ur" ? "ur" : "en",
       // Credentials are valid only for the endpoint to which they were explicitly connected.
-      openRouterConnected:
+      providerConnected:
         isCurrentSchema &&
-        data.openRouterConnected === true &&
+        (data.providerConnected === true) &&
         sameProviderEndpoint(providerKeyBaseUrl, providerBaseUrl),
       providerBaseUrl,
       providerKeyBaseUrl,

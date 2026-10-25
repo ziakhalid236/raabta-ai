@@ -34,7 +34,7 @@ const C = {
 export function AccountsSheet({
   visible,
   language,
-  openRouterConnected,
+  providerConnected,
   selectedModelName,
   githubProfile,
   repositoryCount,
@@ -42,13 +42,13 @@ export function AccountsSheet({
   connecting,
   status,
   onClose,
-  onManageOpenRouter,
+  onManageProvider,
   onConnectGitHub,
   onDisconnectGitHub,
 }: {
   visible: boolean;
   language: "ur" | "en";
-  openRouterConnected: boolean;
+  providerConnected: boolean;
   selectedModelName: string;
   githubProfile: GitHubProfile | null;
   repositoryCount: number;
@@ -56,7 +56,7 @@ export function AccountsSheet({
   connecting: boolean;
   status: string;
   onClose: () => void;
-  onManageOpenRouter: () => void;
+  onManageProvider: () => void;
   onConnectGitHub: (token: string) => Promise<boolean>;
   onDisconnectGitHub: () => void;
 }) {
@@ -117,7 +117,7 @@ export function AccountsSheet({
               <View style={styles.flex}>
                 <Text style={styles.serviceName}>{t("AI provider", "AI provider")}</Text>
                 <Text style={styles.serviceDetail} numberOfLines={1}>
-                  {openRouterConnected
+                  {providerConnected
                     ? selectedModelName ||
                       t(
                         "Connected · choose a chat model",
@@ -129,28 +129,28 @@ export function AccountsSheet({
               <View
                 style={[
                   styles.statusPill,
-                  openRouterConnected && styles.statusPillOn,
+                  providerConnected && styles.statusPillOn,
                 ]}
               >
                 <View
                   style={[
                     styles.statusDot,
-                    openRouterConnected && styles.statusDotOn,
+                    providerConnected && styles.statusDotOn,
                   ]}
                 />
                 <Text
                   style={[
                     styles.statusLabel,
-                    openRouterConnected && styles.statusLabelOn,
+                    providerConnected && styles.statusLabelOn,
                   ]}
                 >
-                  {openRouterConnected ? t("READY", "تیار") : t("OFF", "بند")}
+                  {providerConnected ? t("READY", "تیار") : t("OFF", "بند")}
                 </Text>
               </View>
             </View>
             <Pressable
               accessibilityRole="button"
-              onPress={onManageOpenRouter}
+              onPress={onManageProvider}
               style={styles.manageButton}
             >
               <Ionicons name="key-outline" size={16} color={C.teal} />
