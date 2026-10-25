@@ -109,6 +109,26 @@ that ref in sync via the effect next to the other refs.
   the server build entry compiles. App logic lives in `lib/`, `app/`,
   `components/`.
 
+- **`Response.json()` can only be read once.** In `lib/github-tools.ts`,
+  `updateGitHubFile` parses the body before checking `response.ok`; calling a
+  helper that re-reads the body silently yields `null`. Use
+  `describeGitHubPayload(payload)` with the already-parsed object.
+- **DuckDuckGo blocks app clients.** `html.duckduckgo.com` and
+  `lite.duckduckgo.com` return HTTP 202 with a CAPTCHA interstitial for a
+  scripted user-agent, and public SearXNG instances are challenge-gated too.
+  `searchWeb` therefore runs a provider chain and detects challenge pages
+  (`isChallengePage`) instead of reporting "no results". Never assume a 200/202
+  HTML response means the search actually ran.
+- **Vision detection is a heuristic.** Most OpenAI-compatible `/models`
+  responses carry no modality metadata, so `classifyVisionModels` matches on the
+  model id/name. Keep the pattern in `lib/provider-catalog.ts` current, and use
+  `visionCandidateModels` for pickers so an unrecognised model stays selectable.
+  Do not gate sending an image on `inputModalities` alone.
+- **The GitHub token never reaches the model.** It is read from SecureStore only
+  inside the tool executor in `app/(tabs)/index.tsx`; only the login name and
+  repository list are put in the prompt. Never add the token to a prompt, an
+  error message or the Action Timeline.
+
 ## Design tokens
 
 Shared palette (repeated as `const C` in screens/components): paper
