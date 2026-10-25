@@ -266,6 +266,23 @@ const GITHUB_TOOLS: AiToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "github_get_workflow_run",
+      description:
+        "Inspect one GitHub Actions run by numeric run ID and return its status, conclusion, branch, and URL.",
+      parameters: {
+        type: "object",
+        properties: {
+          repository: string("Repository full name owner/repository"),
+          runId: { type: "number", description: "GitHub Actions run ID" },
+        },
+        required: ["repository", "runId"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 export function getLiveToolDefinitions(options: {

@@ -75,6 +75,7 @@ import {
   createGitHubIssue,
   createGitHubPullRequest,
   dispatchGitHubWorkflow,
+  getGitHubWorkflowRun,
   listGitHubRepositories,
   listGitHubRepositoryFiles,
   listGitHubWorkflowRuns,
@@ -485,6 +486,7 @@ export default function HomeScreen() {
               "create an isolated branch (requires approval)",
               "dispatch an existing workflow (requires approval)",
               "inspect workflow runs",
+              "inspect one workflow run",
             ],
             unavailableActions: ["delete repositories", "merge pull requests", "arbitrary shell execution"],
           })
@@ -639,6 +641,15 @@ export default function HomeScreen() {
               controller.signal,
             ),
           );
+        if (name === "github_get_workflow_run")
+          return JSON.stringify(
+            await getGitHubWorkflowRun(
+              githubToken,
+              String(args.repository),
+              Number(args.runId),
+              controller.signal,
+            ),
+          );
         return `Tool ${name} is not available. Delete, merge and deploy are approval-gated and are not autonomous tools.`;
       };
       const executeTool = async (
@@ -663,6 +674,7 @@ export default function HomeScreen() {
           github_create_branch: ["Preparing an isolated GitHub branch", "الگ GitHub branch تیار ہو رہی ہے"],
           github_dispatch_workflow: ["Preparing a GitHub Actions run", "GitHub Actions run تیار ہو رہا ہے"],
           github_list_workflow_runs: ["Inspecting GitHub Actions runs", "GitHub Actions runs دیکھی جا رہی ہیں"],
+          github_get_workflow_run: ["Inspecting a GitHub Actions run", "ایک GitHub Actions run دیکھی جا رہی ہے"],
         };
         const [englishLabel, urduLabel] = labels[name] ?? [
           `Running ${name}`,

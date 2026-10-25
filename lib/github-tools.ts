@@ -108,12 +108,18 @@ export async function updateGitHubFile(args: {
   branch?: string;
   signal?: AbortSignal;
 }): Promise<GitHubWriteResult> {
-  const currentResponse = await githubFetch(
-    `/repos/${encodeRepository(args.repository)}/contents/${args.path.replace(/^\//, "")}${args.branch ? `?ref=${encodeURIComponent(args.branch)}` : ""}`,
-    args.token,
-    args.signal,
-  );
-  const current: any = await currentResponse.json();
+  let currentSha: string | undefined;
+  try {
+    const currentResponse = await githubFetch(
+      `/repos/${encodeRepository(args.repository)}/contents/${args.path.replace(/^\//, "")}${args.branch ? `?ref=${encodeURIComponent(args.branch)}` : ""}`,
+      args.token,
+      args.signal,
+    );
+    const current: any = await currentResponse.json();
+    currentSha = typeof current?.sha === "string" ? current.sha : undefined;
+  } catch (error) {
+    if (!(error instanceof GitHubToolError) || error.status !== 404) throw error;
+  }
   const response = await fetch(
     `${API}/repos/${encodeRepository(args.repository)}/contents/${args.path.replace(/^\//, "")}`,
     {
@@ -127,7 +133,7 @@ export async function updateGitHubFile(args: {
       body: JSON.stringify({
         message: args.message,
         content: toBase64Utf8(args.content),
-        sha: current.sha,
+        ...(currentSha ? { sha: currentSha } : {}),
         ...(args.branch ? { branch: args.branch } : {}),
       }),
       signal: args.signal,
@@ -144,7 +150,9 @@ export async function updateGitHubFile(args: {
       typeof payload?.content?.html_url === "string"
         ? payload.content.html_url
         : `https://github.com/${args.repository}/blob/${args.branch ?? "main"}/${args.path}`,
-    message: "File updated and committed by the connected GitHub tool.",
+        message: currentSha
+          ? "File updated and committed by the connected GitHub tool."
+          : "New file created and committed by the connected GitHub tool.",
     sha: payload?.content?.sha,
   };
 }
@@ -267,6 +275,31 @@ export async function listGitHubWorkflowRuns(
       createdAt: typeof run.created_at === "string" ? run.created_at : "",
     } satisfies GitHubWorkflowRun];
   });
+}
+
+export async function getGitHubWorkflowRun(
+  token: string,
+  repository: string,
+  runId: number,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun> {
+  const response = await githubFetch(
+    `/repos/${encodeRepository(repository)}/actions/runs/${runId}`,
+    token,
+    signal,
+  );
+  const run: any = await response.json().catch(() => null);
+  if (typeof run?.id !== "number")
+    throw new GitHubToolError("GitHub returned an unreadable workflow run.");
+  return {
+    id: run.id,
+    name: typeof run.name === "string" ? run.name : "GitHub Actions",
+    status: typeof run.status === "string" ? run.status : "unknown",
+    conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
+    branch: typeof run.head_branch === "string" ? run.head_branch : "",
+    url: typeof run.html_url === "string" ? run.html_url : "",
+    createdAt: typeof run.created_at === "string" ? run.created_at : "",
+  };
 }
 async function githubFetch(
   path: string,
