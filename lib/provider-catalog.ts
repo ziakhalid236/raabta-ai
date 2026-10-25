@@ -111,6 +111,11 @@ export async function discoverProviderModels(
       signal,
       baseUrl,
     );
+    const cloudflareProvider =
+      isCloudflareEndpoint(baseUrl) ||
+      chatModels.some(
+        (model) => model.id.startsWith("@cf/") || model.id.startsWith("zoya-"),
+      );
     const providerKind = chatModels.some((model) =>
       model.id.startsWith("zoya-"),
     )
@@ -118,7 +123,7 @@ export async function discoverProviderModels(
       : "generic";
     const visionModels = mergeModels(
       classifyVisionModels(chatModels),
-      isCloudflareEndpoint(baseUrl) ? CLOUDFLARE_VISION_MODELS : [],
+      cloudflareProvider ? CLOUDFLARE_VISION_MODELS : [],
     );
     return {
       chatModels,
@@ -147,7 +152,13 @@ export async function discoverProviderModels(
       chatModels,
       visionModels: mergeModels(
         classifyVisionModels(chatModels),
-        isCloudflareEndpoint(baseUrl) ? CLOUDFLARE_VISION_MODELS : [],
+        isCloudflareEndpoint(baseUrl) ||
+          chatModels.some(
+            (model) =>
+              model.id.startsWith("@cf/") || model.id.startsWith("zoya-"),
+          )
+          ? CLOUDFLARE_VISION_MODELS
+          : [],
       ),
       codingModels: classifyCodingModels(chatModels),
       transcriptionModels: [],
