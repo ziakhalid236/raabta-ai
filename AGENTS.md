@@ -42,6 +42,32 @@ The app is an agent, not a single-shot assistant. Do not regress this.
 Keep the plan truthful: only mark a step done when a real tool result
 confirms it.
 
+### Approvals, verification and the local journal
+
+- `lib/agent/approvals.ts` — `checkApproval(tool, policy)` decides whether a
+  tool needs a prompt. Reads never prompt; writes prompt once and can be
+  remembered; destructive actions always confirm and are never remembered.
+  `applyDecision` returns a new immutable policy. The policy persists in
+  `ChatPreferences.approvalPolicy` (preferences schema v4).
+- `lib/agent/verifier.ts` — `verifyTask()` is pure and synchronous. It reports
+  findings about incomplete steps, failed/blocked tools, empty results,
+  uncited links, and answers claiming a commit/issue/branch/file/workflow run
+  that no tool result supports. `buildRepairPrompt()` turns problems into a
+  corrective instruction. Do not weaken this: it is the agent's only way to
+  check its own work, since there is no shell or test runner on device.
+- `lib/agent/capabilities.ts` — probes the running platform and app sandbox and
+  produces the truth given to the model (no shell, no browser engine, no
+  background work). Extend the `tools` list here when adding a new tool.
+- `lib/agent/journal.ts` — bounded on-device task history (max 50 entries).
+  Stores tool names and statuses only; never arguments or secrets.
+- `AgentTaskController.snapshot` is a **getter**, not a method.
+
+### Approval gotcha
+
+`checkApproval` reads the policy from `approvalPolicyRef.current`, not from
+state, because the tool executor closure is created once per dispatch. Keep
+that ref in sync via the effect next to the other refs.
+
 ## Conventions and gotchas
 
 - **Never use `\b` around Urdu/Arabic-script keywords.** `\b` only matches
