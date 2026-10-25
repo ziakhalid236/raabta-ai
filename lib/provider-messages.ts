@@ -2,9 +2,17 @@ import type { AiToolDefinition } from "@/lib/ai-tools";
 import type { ChatContentPart, ChatRequestMessage } from "@/lib/ai-client";
 import type { ChatMessage } from "@/lib/chat-storage";
 import type { AgentPlan } from "@/lib/agent/planner";
-import { readImageAsDataUrl } from "@/lib/mobile-media";
+import { readImageAsDataUrl } from "./mobile-media";
 
 const MAX_CONTEXT_CHARS = 120_000;
+
+/**
+ * Recent turns sent to the provider. An on-device agent keeps its whole thread
+ * locally, but re-sending an unbounded history would exceed the model's
+ * context window and re-upload every earlier image. Older turns stay in local
+ * history; only the most recent ones are sent.
+ */
+const MAX_HISTORY_MESSAGES = 24;
 
 const AGENT_CONTRACT = `You are Raabta's agent, not a passive chat assistant. You complete the user's task yourself by planning, acting with tools, checking the result, and only then answering.
 
@@ -70,9 +78,16 @@ export async function makeProviderMessages(
         "GitHub is not connected in this app session. No GitHub tools are available. Do not claim to see or modify a GitHub account or repository; ask the user to connect GitHub in Accounts first.",
     });
   }
-  for (const message of messages) {
+  const conversation = messages.filter((message) => message.role !== "activity");
+  const recent = conversation.slice(-MAX_HISTORY_MESSAGES);
+  if (conversation.length > recent.length) {
+    output.push({
+      role: "system",
+      content: `Earlier turns were omitted to stay within the model's context window (${conversation.length - recent.length} older message${conversation.length - recent.length === 1 ? "" : "s"} kept on the device). Ask the user to repeat anything you still need from before this point; do not assume its contents.`,
+    });
+  }
+  for (const message of recent) {
     if (signal.aborted) throw new Error("Request stopped.");
-    if (message.role === "activity") continue;
     if (message.role === "assistant") {
       output.push({ role: "assistant", content: message.content });
       continue;

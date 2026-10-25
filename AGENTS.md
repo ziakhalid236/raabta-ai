@@ -62,6 +62,28 @@ confirms it.
   Stores tool names and statuses only; never arguments or secrets.
 - `AgentTaskController.snapshot` is a **getter**, not a method.
 
+### Self-repair loop
+
+`app/(tabs)/index.tsx` keeps `chatMessages` mutable across the dispatch. After the
+first answer, `buildRepairPrompt(report)` is fed back as a user turn and the
+model is asked again, at most `MAX_SELF_REPAIRS` (2) times. Only the final
+answer is stored in the thread, so the user sees one clean reply. Do not make
+this unbounded: every repair is a full provider round trip.
+
+### Provider retries
+
+`lib/ai-client.ts` retries only transient failures (`isTransientStatus`: 408,
+429, 5xx) and dropped connections, with exponential backoff, at most
+`MAX_PROVIDER_RETRIES` (2) extra attempts. 400/401/403/404/413 fail at once so
+the user sees the real cause. Tests in `tests/ai-client.retry.test.ts` assert
+both behaviours.
+
+### Context window
+
+`lib/provider-messages.ts` sends only the most recent `MAX_HISTORY_MESSAGES`
+(24) non-activity turns, and pushes a system note naming how many older turns
+were dropped. This prevents unbounded growth and re-uploading old images.
+
 ### Approval gotcha
 
 `checkApproval` reads the policy from `approvalPolicyRef.current`, not from

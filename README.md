@@ -42,6 +42,10 @@ A verification step always runs before the final answer, so the model is instruc
 
 Consequential tools are classified by risk. Read-only tools never prompt. Write tools (commit a file, create an issue, create a branch, write a workspace file) prompt once, and choosing **Always allow** stores that decision on the device so the agent stops asking for the same action. Destructive tools (delete a workspace file, open a pull request, dispatch a workflow) are never remembered and always confirm. A decision you decline is remembered too, so the agent reports that it skipped the action instead of asking again. The approval card shows the exact content that will be sent and a clear risk badge, not a vague label.
 
+### A closed loop: plan, act, check, repair
+The agent does not stop at a first draft. After the model answers, the local verifier checks the answer against the evidence collected on the device. If it finds an unsupported claim, the finding is handed straight back to the model and the agent rewrites the answer, up to twice, before showing it. A phone that loses signal mid-task does not lose the task either: transient provider failures (no connection, rate limit, provider 5xx) are retried with backoff, while permanent ones (bad key, unknown model, oversized image) fail immediately so the real cause is visible instead of hidden behind a delay.
+### Staying inside the context window
+A long conversation is kept in full on the device, but only the most recent 24 turns are sent to the model. When older turns are omitted, an explicit system note tells the model what was dropped so it asks rather than inventing the missing context. This also stops earlier images from being re-uploaded on every turn.
 ### Verifying its own work without a shell
 
 The agent runs entirely inside the Android app, so it has no terminal, no browser engine and no test runner. Instead of pretending otherwise, it checks its own work locally:

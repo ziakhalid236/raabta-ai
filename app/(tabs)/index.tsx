@@ -139,6 +139,9 @@ type SourceAction = {
 };
 
 type Panel = "chat" | "history" | "roadmap" | "research" | "settings";
+
+/** How many times the agent may rewrite its own answer after a failed self-check. */
+const MAX_SELF_REPAIRS = 2;
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 const C = {
@@ -1036,10 +1039,11 @@ export default function HomeScreen() {
         taskController.setStatus("verifying");
         taskController.advanceTo(verifyIndex);
       }
-      const answer = await requestChatCompletion({
+      const chatMessages = [...providerMessages];
+      let answer = await requestChatCompletion({
         modelId: selectedTaskModelId,
         apiKey,
-        messages: providerMessages,
+        messages: chatMessages,
         signal: controller.signal,
         baseUrl: preferences.providerBaseUrl,
         tools: availableTools,
@@ -1052,6 +1056,62 @@ export default function HomeScreen() {
         ),
         "complete",
       );
+
+      // Local logic check. This is the agent's only way to inspect its own
+      // work, because the app has no shell, browser or test runner. When the
+      // check finds an unsupported claim the agent is handed the finding and
+      // given one bounded chance to fix it, rather than shipping the claim.
+      const verifyAnswer = (text: string) => {
+        const snap = taskController.snapshot;
+        return verifyTask({
+          plan: snap.plan,
+          events: snap.events,
+          answer: text,
+          hadSources: snap.events.some(
+            (event) =>
+              event.tool === "web_search" || event.tool === "read_public_web_page",
+          ),
+        });
+      };
+      let report = verifyAnswer(answer);
+      let repairs = 0;
+      while (repairs < MAX_SELF_REPAIRS && !controller.signal.aborted) {
+        const repair = buildRepairPrompt(report);
+        if (!repair) break;
+        repairs += 1;
+        addActivity(
+          t(
+            `Self-check found an unsupported claim. Retrying (${repairs}/${MAX_SELF_REPAIRS})…`,
+            `خود جانچ نے ایک غیر ثابت شدہ بات پکڑی۔ دوبارہ کوشش (${repairs}/${MAX_SELF_REPAIRS})…`,
+          ),
+          { activityKind: "verify", activityPlatform: t("Verifier", "جانچ") },
+        );
+        chatMessages.push({ role: "assistant", content: answer });
+        chatMessages.push({ role: "user", content: repair });
+        const corrected = await requestChatCompletion({
+          modelId: selectedTaskModelId,
+          apiKey,
+          messages: chatMessages,
+          signal: controller.signal,
+          baseUrl: preferences.providerBaseUrl,
+          tools: availableTools,
+          executeTool,
+        });
+        answer = corrected;
+        report = verifyAnswer(answer);
+      }
+      const taskSnapshot = taskController.snapshot;
+      setVerification(report);
+      setPlanExpanded(false);
+      if (report.severity === "problem") {
+        addActivity(
+          t(
+            "The self-check could not confirm every claim. Review it before relying on this answer.",
+            "خود جانچ ہر بات کی تصدیق نہ کر سکی۔ بھروسہ کرنے سے پہلے اسے دیکھ لیں۔",
+          ),
+          { activityKind: "verify", activityPlatform: t("Verifier", "جانچ") },
+        );
+      }
       const assistantMessage: ChatMessage = {
         id: makeId("message"),
         role: "assistant",
@@ -1064,31 +1124,6 @@ export default function HomeScreen() {
         messages: [...thread.messages, assistantMessage],
       }));
       taskController.finish("done");
-
-      // Local logic check: compare the answer against the evidence collected
-      // on this device. No shell or browser is available, so verification is
-      // a reasoning pass over real tool results rather than a test run.
-      const taskSnapshot = taskController.snapshot;
-      const report = verifyTask({
-        plan: taskSnapshot.plan,
-        events: taskSnapshot.events,
-        answer,
-        hadSources: taskSnapshot.events.some(
-          (event) => event.tool === "web_search" || event.tool === "read_public_web_page",
-        ),
-      });
-      setVerification(report);
-      setPlanExpanded(false);
-      const repair = buildRepairPrompt(report);
-      if (repair) {
-        addActivity(
-          t(
-            "Local check found an unsupported claim. Ask the agent to fix it.",
-            "مقامی جانچ نے ایک غیر ثابت شدہ بات پکڑی۔ ایجنٹ سے درست کرنے کو کہیں۔",
-          ),
-          { activityKind: "verify", activityPlatform: t("Verifier", "جانچ") },
-        );
-      }
       void appendJournalEntry(
         toJournalEntry({
           id: makeId("journal"),
