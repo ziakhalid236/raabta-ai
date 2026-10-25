@@ -38,7 +38,10 @@ import {
   requestChatCompletion,
 } from "@/lib/ai-client";
 import { getLiveToolDefinitions } from "@/lib/ai-tools";
-import { DEFAULT_PROVIDER_BASE_URL, sameProviderEndpoint } from "@/lib/provider-identity";
+import {
+  DEFAULT_PROVIDER_BASE_URL,
+  sameProviderEndpoint,
+} from "@/lib/provider-identity";
 import {
   createAIWorkspaceDirectory,
   deleteAIWorkspaceFile,
@@ -59,7 +62,10 @@ import {
   type ApprovalDecision,
   type ApprovalPolicy,
 } from "@/lib/agent/approvals";
-import { detectCapabilities, type CapabilityReport } from "@/lib/agent/capabilities";
+import {
+  detectCapabilities,
+  type CapabilityReport,
+} from "@/lib/agent/capabilities";
 import {
   appendJournalEntry,
   journalContext,
@@ -67,8 +73,15 @@ import {
   toJournalEntry,
   type JournalEntry,
 } from "@/lib/agent/journal";
-import { buildRepairPrompt, verifyTask, type VerificationReport } from "@/lib/agent/verifier";
-import { ApprovalSheet, type ApprovalRequest } from "@/components/raabta/approval-sheet";
+import {
+  buildRepairPrompt,
+  verifyTask,
+  type VerificationReport,
+} from "@/lib/agent/verifier";
+import {
+  ApprovalSheet,
+  type ApprovalRequest,
+} from "@/components/raabta/approval-sheet";
 import { AgentReviewCard } from "@/components/raabta/agent-review-card";
 import {
   createThread,
@@ -132,6 +145,12 @@ import {
   type WebSource,
   WebToolError,
 } from "@/lib/web-tools";
+import {
+  clearRegenerableFiles,
+  formatStorageBytes,
+  getStorageReport,
+  type StorageReport,
+} from "@/lib/storage-management";
 
 type SourceAction = {
   progressLabel: string;
@@ -250,17 +269,30 @@ export default function HomeScreen() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [agentTask, setAgentTask] = useState<AgentTask | null>(null);
   const [planExpanded, setPlanExpanded] = useState(false);
-  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
-  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>(EMPTY_APPROVAL_POLICY);
-  const [verification, setVerification] = useState<VerificationReport | null>(null);
-  const [capabilities, setCapabilities] = useState<CapabilityReport | null>(null);
+  const [approvalRequest, setApprovalRequest] =
+    useState<ApprovalRequest | null>(null);
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>(
+    EMPTY_APPROVAL_POLICY,
+  );
+  const [verification, setVerification] = useState<VerificationReport | null>(
+    null,
+  );
+  const [capabilities, setCapabilities] = useState<CapabilityReport | null>(
+    null,
+  );
+  const [storageReport, setStorageReport] = useState<StorageReport | null>(
+    null,
+  );
+  const [isCleaningStorage, setIsCleaningStorage] = useState(false);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const approvalPolicyRef = useRef<ApprovalPolicy>(EMPTY_APPROVAL_POLICY);
   const preferencesRef = useRef<ChatPreferences>(DEFAULT_PREFERENCES);
   const journalRef = useRef<JournalEntry[]>([]);
-  const approvalResolverRef = useRef<((decision: ApprovalDecision) => void) | null>(null);
+  const approvalResolverRef = useRef<
+    ((decision: ApprovalDecision) => void) | null
+  >(null);
 
   useEffect(() => {
     approvalPolicyRef.current = approvalPolicy;
@@ -273,6 +305,14 @@ export default function HomeScreen() {
   useEffect(() => {
     journalRef.current = journal;
   }, [journal]);
+  const refreshStorageReport = useCallback(() => {
+    void getStorageReport()
+      .then(setStorageReport)
+      .catch(() => setStorageReport(null));
+  }, []);
+  useEffect(() => {
+    refreshStorageReport();
+  }, [refreshStorageReport, threads.length]);
 
   const requestAgentApproval = useCallback(
     (request: ApprovalRequest): Promise<boolean> =>
@@ -283,9 +323,10 @@ export default function HomeScreen() {
           setApprovalRequest(null);
           setApprovalPolicy((current) => {
             const next = applyDecision(current, request.tool, decision);
-            void savePreferences({ ...preferencesRef.current, approvalPolicy: next }).catch(
-              () => undefined,
-            );
+            void savePreferences({
+              ...preferencesRef.current,
+              approvalPolicy: next,
+            }).catch(() => undefined);
             return next;
           });
           resolve(decision !== "deny");
@@ -311,14 +352,19 @@ export default function HomeScreen() {
     let active = true;
     async function hydrate() {
       try {
-        const [storedThreads, storedPreferences, apiKey, githubToken, storedJournal] =
-          await Promise.all([
-            loadThreads(),
-            loadPreferences(),
-            readApiKey(),
-            readGitHubToken(),
-            loadJournal(),
-          ]);
+        const [
+          storedThreads,
+          storedPreferences,
+          apiKey,
+          githubToken,
+          storedJournal,
+        ] = await Promise.all([
+          loadThreads(),
+          loadPreferences(),
+          readApiKey(),
+          readGitHubToken(),
+          loadJournal(),
+        ]);
         if (!active) return;
         const hydratedThreads = storedThreads.length
           ? storedThreads
@@ -354,7 +400,9 @@ export default function HomeScreen() {
         void detectCapabilities({
           githubConnected: Boolean(githubToken),
           hasVisionModel: Boolean(storedPreferences.visionModelId),
-          hasTranscriptionModel: Boolean(storedPreferences.transcriptionModelId),
+          hasTranscriptionModel: Boolean(
+            storedPreferences.transcriptionModelId,
+          ),
         })
           .then((report) => {
             if (active) setCapabilities(report);
@@ -426,7 +474,10 @@ export default function HomeScreen() {
     setShowError("");
     if (
       !providerConnected ||
-      !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl) ||
+      !sameProviderEndpoint(
+        preferences.providerKeyBaseUrl,
+        preferences.providerBaseUrl,
+      ) ||
       !preferences.modelId.trim() ||
       !hasKey
     ) {
@@ -457,11 +508,7 @@ export default function HomeScreen() {
     const chatDisplayName =
       preferences.modelName.trim() ||
       t("your selected model", "آپ کا منتخب ماڈل");
-    const selectedTaskModelId = selectTaskModel(
-      preferences,
-      text,
-      attachments,
-    );
+    const selectedTaskModelId = selectTaskModel(preferences, text, attachments);
     let currentThread = activeThread;
     if (!currentThread) {
       currentThread = createThread();
@@ -551,7 +598,8 @@ export default function HomeScreen() {
         updatedAt: createdAt,
         messages: [
           ...thread.messages.map((message) =>
-            message.id === previousActivityId && message.activityStatus === "working"
+            message.id === previousActivityId &&
+            message.activityStatus === "working"
               ? { ...message, activityStatus: "complete" as const }
               : message,
           ),
@@ -608,7 +656,11 @@ export default function HomeScreen() {
               "inspect workflow runs",
               "inspect one workflow run",
             ],
-            unavailableActions: ["delete repositories", "merge pull requests", "arbitrary shell execution"],
+            unavailableActions: [
+              "delete repositories",
+              "merge pull requests",
+              "arbitrary shell execution",
+            ],
             operatingContract: [
               "Never claim a file was uploaded, pushed, built, or deployed without a successful tool result containing a URL, SHA, run ID, or other returned evidence.",
               "After an approved file write, read the target file or inspect the returned commit before reporting completion; for CI work, inspect the workflow run and conclusion.",
@@ -690,7 +742,9 @@ export default function HomeScreen() {
           };
           setPreferences(nextPreferences);
           void savePreferences(nextPreferences).catch(() => {
-            setSettingsNotice("The refreshed GitHub repository list could not be saved locally.");
+            setSettingsNotice(
+              "The refreshed GitHub repository list could not be saved locally.",
+            );
           });
           return JSON.stringify(repositories);
         }
@@ -754,7 +808,10 @@ export default function HomeScreen() {
               token: githubToken,
               repository: String(args.repository),
               branch: String(args.branch),
-              fromBranch: typeof args.fromBranch === "string" ? args.fromBranch : undefined,
+              fromBranch:
+                typeof args.fromBranch === "string"
+                  ? args.fromBranch
+                  : undefined,
               signal: controller.signal,
             }),
           );
@@ -766,14 +823,19 @@ export default function HomeScreen() {
               "For safety, Raabta can dispatch only the repository engineering-checks.yml workflow.",
             );
           if (!/^(main|master|refs\/heads\/(main|master))$/.test(ref))
-            throw new Error("For safety, workflow dispatch is limited to the main or master branch.");
+            throw new Error(
+              "For safety, workflow dispatch is limited to the main or master branch.",
+            );
           let inputs: Record<string, string> | undefined;
           if (typeof args.inputs === "string" && args.inputs.trim()) {
             const parsed: unknown = JSON.parse(args.inputs);
             if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
               throw new Error("Workflow inputs must be a JSON object.");
             inputs = Object.fromEntries(
-              Object.entries(parsed).map(([key, value]) => [key, String(value)]),
+              Object.entries(parsed).map(([key, value]) => [
+                key,
+                String(value),
+              ]),
             );
           }
           return JSON.stringify(
@@ -815,25 +877,82 @@ export default function HomeScreen() {
         const path = typeof args.path === "string" ? args.path : "";
         const labels: Record<string, [string, string]> = {
           web_search: ["Searching the public web", "عوامی ویب پر تلاش جاری ہے"],
-          read_public_web_page: ["Reading a public web page", "عوامی ویب صفحہ پڑھا جا رہا ہے"],
-          ai_workspace_list_files: ["Listing files in the private AI workspace", "نجی AI workspace کی فائلیں دیکھی جا رہی ہیں"],
-          ai_workspace_find_text: ["Searching workspace text", "workspace کے متن میں تلاش جاری ہے"],
-          ai_workspace_read_file: ["Reading a private workspace file", "نجی workspace فائل پڑھی جا رہی ہے"],
-          ai_workspace_write_file: ["Writing a private workspace file", "نجی workspace فائل لکھی جا رہی ہے"],
-          ai_workspace_create_directory: ["Creating a private workspace folder", "نجی workspace فولڈر بنایا جا رہا ہے"],
-          ai_workspace_move_file: ["Moving a private workspace file", "نجی workspace فائل منتقل کی جا رہی ہے"],
-          ai_workspace_file_info: ["Inspecting a private workspace file", "نجی workspace فائل کا جائزہ لیا جا رہا ہے"],
-          ai_workspace_delete_file: ["Preparing to delete a private workspace file", "نجی workspace فائل حذف کرنے کی تیاری"],
-          github_list_repositories: ["Listing GitHub repositories", "GitHub repositories دیکھی جا رہی ہیں"],
-          github_list_files: ["Listing repository files", "repository کی فائلیں دیکھی جا رہی ہیں"],
-          github_read_file: ["Reading a repository file", "repository کی فائل پڑھی جا رہی ہے"],
-          github_update_file: ["Preparing a GitHub file update", "GitHub فائل کی تبدیلی تیار ہو رہی ہے"],
-          github_create_issue: ["Preparing a GitHub issue", "GitHub issue تیار ہو رہا ہے"],
-          github_create_pull_request: ["Preparing a GitHub pull request", "GitHub pull request تیار ہو رہی ہے"],
-          github_create_branch: ["Preparing an isolated GitHub branch", "الگ GitHub branch تیار ہو رہی ہے"],
-          github_dispatch_workflow: ["Preparing a GitHub Actions run", "GitHub Actions run تیار ہو رہا ہے"],
-          github_list_workflow_runs: ["Inspecting GitHub Actions runs", "GitHub Actions runs دیکھی جا رہی ہیں"],
-          github_get_workflow_run: ["Inspecting a GitHub Actions run", "ایک GitHub Actions run دیکھی جا رہی ہے"],
+          read_public_web_page: [
+            "Reading a public web page",
+            "عوامی ویب صفحہ پڑھا جا رہا ہے",
+          ],
+          ai_workspace_list_files: [
+            "Listing files in the private AI workspace",
+            "نجی AI workspace کی فائلیں دیکھی جا رہی ہیں",
+          ],
+          ai_workspace_find_text: [
+            "Searching workspace text",
+            "workspace کے متن میں تلاش جاری ہے",
+          ],
+          ai_workspace_read_file: [
+            "Reading a private workspace file",
+            "نجی workspace فائل پڑھی جا رہی ہے",
+          ],
+          ai_workspace_write_file: [
+            "Writing a private workspace file",
+            "نجی workspace فائل لکھی جا رہی ہے",
+          ],
+          ai_workspace_create_directory: [
+            "Creating a private workspace folder",
+            "نجی workspace فولڈر بنایا جا رہا ہے",
+          ],
+          ai_workspace_move_file: [
+            "Moving a private workspace file",
+            "نجی workspace فائل منتقل کی جا رہی ہے",
+          ],
+          ai_workspace_file_info: [
+            "Inspecting a private workspace file",
+            "نجی workspace فائل کا جائزہ لیا جا رہا ہے",
+          ],
+          ai_workspace_delete_file: [
+            "Preparing to delete a private workspace file",
+            "نجی workspace فائل حذف کرنے کی تیاری",
+          ],
+          github_list_repositories: [
+            "Listing GitHub repositories",
+            "GitHub repositories دیکھی جا رہی ہیں",
+          ],
+          github_list_files: [
+            "Listing repository files",
+            "repository کی فائلیں دیکھی جا رہی ہیں",
+          ],
+          github_read_file: [
+            "Reading a repository file",
+            "repository کی فائل پڑھی جا رہی ہے",
+          ],
+          github_update_file: [
+            "Preparing a GitHub file update",
+            "GitHub فائل کی تبدیلی تیار ہو رہی ہے",
+          ],
+          github_create_issue: [
+            "Preparing a GitHub issue",
+            "GitHub issue تیار ہو رہا ہے",
+          ],
+          github_create_pull_request: [
+            "Preparing a GitHub pull request",
+            "GitHub pull request تیار ہو رہی ہے",
+          ],
+          github_create_branch: [
+            "Preparing an isolated GitHub branch",
+            "الگ GitHub branch تیار ہو رہی ہے",
+          ],
+          github_dispatch_workflow: [
+            "Preparing a GitHub Actions run",
+            "GitHub Actions run تیار ہو رہا ہے",
+          ],
+          github_list_workflow_runs: [
+            "Inspecting GitHub Actions runs",
+            "GitHub Actions runs دیکھی جا رہی ہیں",
+          ],
+          github_get_workflow_run: [
+            "Inspecting a GitHub Actions run",
+            "ایک GitHub Actions run دیکھی جا رہی ہے",
+          ],
         };
         const [englishLabel, urduLabel] = labels[name] ?? [
           `Running ${name}`,
@@ -1002,7 +1121,9 @@ export default function HomeScreen() {
         preferences.providerKind === "cloudflare-worker"
           ? async (attachment, prompt) => {
               if (!attachment.uri)
-                throw new AIRequestError("This image is no longer available on the device.");
+                throw new AIRequestError(
+                  "This image is no longer available on the device.",
+                );
               return requestCloudflareFileAnalysis({
                 apiKey,
                 baseUrl: preferences.providerBaseUrl,
@@ -1017,10 +1138,7 @@ export default function HomeScreen() {
             }
           : undefined,
         agentPlan,
-        [
-          capabilities?.summary ?? "",
-          journalContext(journalRef.current),
-        ]
+        [capabilities?.summary ?? "", journalContext(journalRef.current)]
           .filter(Boolean)
           .join("\n\n"),
       );
@@ -1031,7 +1149,9 @@ export default function HomeScreen() {
         ),
         { activityKind: "model", activityPlatform: "AI provider" },
       );
-      const verifyIndex = agentPlan.steps.findIndex((step) => step.kind === "verify");
+      const verifyIndex = agentPlan.steps.findIndex(
+        (step) => step.kind === "verify",
+      );
       if (verifyIndex >= 0) {
         taskController.setStatus("verifying");
         taskController.advanceTo(verifyIndex);
@@ -1074,7 +1194,9 @@ export default function HomeScreen() {
         events: taskSnapshot.events,
         answer,
         hadSources: taskSnapshot.events.some(
-          (event) => event.tool === "web_search" || event.tool === "read_public_web_page",
+          (event) =>
+            event.tool === "web_search" ||
+            event.tool === "read_public_web_page",
         ),
       });
       setVerification(report);
@@ -1192,7 +1314,10 @@ export default function HomeScreen() {
   async function transcribeAudioFile(file: LocalAudioFile) {
     if (
       !providerConnected ||
-      !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl) ||
+      !sameProviderEndpoint(
+        preferences.providerKeyBaseUrl,
+        preferences.providerBaseUrl,
+      ) ||
       !preferences.transcriptionModelId ||
       !hasKey
     ) {
@@ -1363,11 +1488,7 @@ export default function HomeScreen() {
         });
         return;
       }
-      if (
-        !providerConnected ||
-        !preferences.transcriptionModelId ||
-        !hasKey
-      ) {
+      if (!providerConnected || !preferences.transcriptionModelId || !hasKey) {
         setShowError(
           t(
             "Connect AI provider and choose a transcription model in Settings before recording.",
@@ -1424,7 +1545,7 @@ export default function HomeScreen() {
         candidateKey = (await readApiKey()) ?? "";
       } catch {
         setSettingsNotice(
-            "Could not read the saved key securely. Try again or paste a new provider key.",
+          "Could not read the saved key securely. Try again or paste a new provider key.",
         );
         return;
       }
@@ -1681,6 +1802,89 @@ export default function HomeScreen() {
     setPendingAttachments([]);
   };
 
+  function deleteConversation(threadId: string) {
+    const thread = threadsRef.current.find((item) => item.id === threadId);
+    if (!thread) return;
+    Alert.alert(
+      t("Delete conversation?", "گفتگو حذف کریں؟"),
+      t(
+        `This deletes “${thread.title}” from this device.`,
+        `یہ “${thread.title}” اس فون سے حذف ہو جائے گی۔`,
+      ),
+      [
+        { text: t("Cancel", "منسوخ"), style: "cancel" },
+        {
+          text: t("Delete", "حذف کریں"),
+          style: "destructive",
+          onPress: () => {
+            const remaining = threadsRef.current.filter(
+              (item) => item.id !== threadId,
+            );
+            const next = remaining.length ? remaining : [createThread()];
+            replaceThreads(next);
+            if (activeThreadId === threadId) setActiveThreadId(next[0].id);
+            setHistoryNotice(
+              t(
+                "Conversation deleted from this device.",
+                "گفتگو اس فون سے حذف ہو گئی۔",
+              ),
+            );
+          },
+        },
+      ],
+    );
+  }
+  function deleteAllConversations() {
+    if (!threadsRef.current.length) return;
+    Alert.alert(
+      t("Delete all history?", "تمام تاریخ حذف کریں؟"),
+      t(
+        "All local conversations will be removed from this device.",
+        "اس فون سے تمام مقامی گفتگوئیں حذف ہو جائیں گی۔",
+      ),
+      [
+        { text: t("Cancel", "منسوخ"), style: "cancel" },
+        {
+          text: t("Delete all", "سب حذف کریں"),
+          style: "destructive",
+          onPress: () => {
+            const next = [createThread()];
+            replaceThreads(next);
+            setActiveThreadId(next[0].id);
+            setHistoryNotice(
+              t(
+                "All conversation history was deleted.",
+                "تمام گفتگو کی تاریخ حذف ہو گئی۔",
+              ),
+            );
+          },
+        },
+      ],
+    );
+  }
+  function cleanRegenerableStorage() {
+    Alert.alert(
+      t("Clear downloaded files?", "ڈاؤن لوڈ فائلیں صاف کریں؟"),
+      t(
+        "This removes saved research pages and temporary voice recordings. Chats, workspace files and keys stay safe.",
+        "محفوظ research صفحات اور عارضی voice recordings حذف ہوں گی؛ chats، workspace files اور keys محفوظ رہیں گی۔",
+      ),
+      [
+        { text: t("Cancel", "منسوخ"), style: "cancel" },
+        {
+          text: t("Clear", "صاف کریں"),
+          style: "destructive",
+          onPress: () => {
+            setIsCleaningStorage(true);
+            void clearRegenerableFiles().finally(() => {
+              setIsCleaningStorage(false);
+              refreshStorageReport();
+            });
+          },
+        },
+      ],
+    );
+  }
   const navItems: { id: Panel; icon: IconName; label: string }[] = [
     {
       id: "chat",
@@ -1848,8 +2052,8 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.welcomeCopy}>
                   {t(
-          "Connect an AI provider, choose a model by name, and keep your conversation history on this device.",
-          "ایک AI provider جوڑیں، نام سے model منتخب کریں، اور اپنی گفتگو اسی فون پر محفوظ رکھیں۔",
+                    "Connect an AI provider, choose a model by name, and keep your conversation history on this device.",
+                    "ایک AI provider جوڑیں، نام سے model منتخب کریں، اور اپنی گفتگو اسی فون پر محفوظ رکھیں۔",
                   )}
                 </Text>
                 <Pressable
@@ -1886,18 +2090,27 @@ export default function HomeScreen() {
                   </Text>
                   <SetupStep
                     done={providerConnected}
-                    label={t("Connect your AI provider key", "اپنے AI provider کی key جوڑیں")}
+                    label={t(
+                      "Connect your AI provider key",
+                      "اپنے AI provider کی key جوڑیں",
+                    )}
                     onPress={openSettings}
                   />
                   <SetupStep
                     done={Boolean(preferences.modelId)}
-                    label={t("Choose a chat model by name", "نام سے chat model منتخب کریں")}
+                    label={t(
+                      "Choose a chat model by name",
+                      "نام سے chat model منتخب کریں",
+                    )}
                     onPress={openSettings}
                   />
                   <SetupStep
                     done={Boolean(githubProfile)}
                     optional
-                    label={t("Connect GitHub for repository tasks", "repository کاموں کے لیے GitHub جوڑیں")}
+                    label={t(
+                      "Connect GitHub for repository tasks",
+                      "repository کاموں کے لیے GitHub جوڑیں",
+                    )}
                     onPress={() => setPanel("settings")}
                   />
                   <Text style={styles.checklistNote}>
@@ -2103,11 +2316,20 @@ export default function HomeScreen() {
           icon="time-outline"
           onBack={() => setPanel("chat")}
           action={
-            <IconButton
-              icon="add"
-              label={t("Start a new chat", "نئی گفتگو")}
-              onPress={startNewChat}
-            />
+            <View style={styles.headerActions}>
+              <IconButton
+                icon="add"
+                label={t("Start a new chat", "نئی گفتگو")}
+                onPress={startNewChat}
+              />
+              {threads.length ? (
+                <IconButton
+                  icon="trash-outline"
+                  label={t("Delete all history", "تمام تاریخ حذف کریں")}
+                  onPress={deleteAllConversations}
+                />
+              ) : null}
+            </View>
           }
         >
           {historyNotice ? <Notice text={historyNotice} danger /> : null}
@@ -2146,6 +2368,21 @@ export default function HomeScreen() {
                       messages
                     </Text>
                   </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t(
+                      "Delete conversation",
+                      "گفتگو حذف کریں",
+                    )}
+                    hitSlop={8}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      deleteConversation(thread.id);
+                    }}
+                    style={styles.historyDeleteButton}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={C.danger} />
+                  </Pressable>
                   <Ionicons name="chevron-forward" size={17} color="#A4ACA8" />
                 </Pressable>
               ))
@@ -2516,6 +2753,62 @@ export default function HomeScreen() {
               "AI workspace کی فائلیں Raabta کی نجی app storage میں رہتی ہیں (کل 100 MB؛ فی فائل 10 MB)۔ ایجنٹ دوسری فون فائلیں نہیں پڑھ سکتا اور خود سے terminal commands نہیں چلا سکتا۔",
             )}
           />
+          <View style={styles.storageCard}>
+            <View style={styles.storageHeader}>
+              <View style={styles.setupIcon}>
+                <Ionicons name="server-outline" size={17} color={C.teal} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={styles.setupTitle}>
+                  {t("Phone storage", "فون کی storage")}
+                </Text>
+                <Text style={styles.setupSubtitle}>
+                  {storageReport
+                    ? `${formatStorageBytes(storageReport.totalBytes)} used by Raabta`
+                    : t("Checking app storage…", "ایپ storage چیک ہو رہی ہے…")}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                onPress={refreshStorageReport}
+                hitSlop={8}
+              >
+                <Ionicons name="refresh-outline" size={17} color={C.teal} />
+              </Pressable>
+            </View>
+            {storageReport
+              ? storageReport.breakdown
+                  .filter((item) => item.bytes > 0)
+                  .map((item) => (
+                    <View key={item.label} style={styles.storageRow}>
+                      <Text style={styles.storageLabel}>{item.label}</Text>
+                      <Text style={styles.storageValue}>
+                        {formatStorageBytes(item.bytes)}
+                      </Text>
+                    </View>
+                  ))
+              : null}
+            <Pressable
+              accessibilityRole="button"
+              disabled={isCleaningStorage}
+              onPress={cleanRegenerableStorage}
+              style={styles.secondaryButton}
+            >
+              {isCleaningStorage ? (
+                <ActivityIndicator size="small" color={C.teal} />
+              ) : (
+                <Ionicons name="sparkles-outline" size={17} color={C.teal} />
+              )}
+              <Text style={styles.secondaryButtonText}>
+                {isCleaningStorage
+                  ? t("Cleaning…", "صاف ہو رہا ہے…")
+                  : t(
+                      "Clear downloads and recordings",
+                      "downloads اور recordings صاف کریں",
+                    )}
+              </Text>
+            </Pressable>
+          </View>
           <View style={styles.keyInputWrap}>
             <TextInput
               accessibilityLabel="Provider API key"
@@ -2713,19 +3006,29 @@ export default function HomeScreen() {
               }
               setModelPickerKind("vision");
             }}
-            style={[styles.researchCard, { flexDirection: "row", alignItems: "center" }]}
+            style={[
+              styles.researchCard,
+              { flexDirection: "row", alignItems: "center" },
+            ]}
           >
             <View style={styles.setupIcon}>
               <Ionicons name="image-outline" size={17} color={C.teal} />
             </View>
             <View style={styles.flex}>
               <Text style={styles.setupTitle}>
-                {preferences.visionModelName || t("Choose an image model", "امیج ماڈل منتخب کریں")}
+                {preferences.visionModelName ||
+                  t("Choose an image model", "امیج ماڈل منتخب کریں")}
               </Text>
               <Text style={styles.setupSubtitle}>
                 {modelCatalog?.visionModels.length
-                  ? t(`${modelCatalog.visionModels.length} image-capable model(s) detected`, `${modelCatalog.visionModels.length} image-capable ماڈل ملے`)
-                  : t("No image model reported yet · refresh catalog", "ابھی image model نہیں ملا · catalog refresh کریں")}
+                  ? t(
+                      `${modelCatalog.visionModels.length} image-capable model(s) detected`,
+                      `${modelCatalog.visionModels.length} image-capable ماڈل ملے`,
+                    )
+                  : t(
+                      "No image model reported yet · refresh catalog",
+                      "ابھی image model نہیں ملا · catalog refresh کریں",
+                    )}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={17} color={C.muted} />
@@ -2739,19 +3042,23 @@ export default function HomeScreen() {
                 </Text>
               </View>
               <Text style={styles.routingLine}>
-                {t("Text: ", "Text: ")}{preferences.modelName || preferences.modelId}
+                {t("Text: ", "Text: ")}
+                {preferences.modelName || preferences.modelId}
               </Text>
               <Text style={styles.routingLine}>
                 {t("Vision: ", "Vision: ")}
-                {preferences.visionModelName || t("Not reported by provider", "provider نے نہیں بتایا")}
+                {preferences.visionModelName ||
+                  t("Not reported by provider", "provider نے نہیں بتایا")}
               </Text>
               <Text style={styles.routingLine}>
                 {t("Coding: ", "Coding: ")}
-                {preferences.codingModelName || t("Text model fallback", "text model fallback")}
+                {preferences.codingModelName ||
+                  t("Text model fallback", "text model fallback")}
               </Text>
               <Text style={styles.routingLine}>
                 {t("Voice: ", "Voice: ")}
-                {preferences.transcriptionModelName || t("Not available", "دستیاب نہیں")}
+                {preferences.transcriptionModelName ||
+                  t("Not available", "دستیاب نہیں")}
               </Text>
             </View>
           ) : null}
@@ -2768,7 +3075,10 @@ export default function HomeScreen() {
             onPress={() => {
               if (
                 !isProviderDraftConnected ||
-                !sameProviderEndpoint(preferences.providerKeyBaseUrl, preferences.providerBaseUrl)
+                !sameProviderEndpoint(
+                  preferences.providerKeyBaseUrl,
+                  preferences.providerBaseUrl,
+                )
               ) {
                 setSettingsNotice(
                   t(
@@ -2932,8 +3242,7 @@ export default function HomeScreen() {
         onSelect={(model) => {
           if (modelPickerKind === "transcription")
             void selectTranscriptionModel(model);
-          else if (modelPickerKind === "vision")
-            void selectVisionModel(model);
+          else if (modelPickerKind === "vision") void selectVisionModel(model);
           else void selectChatModel(model);
         }}
       />
@@ -3075,7 +3384,10 @@ function selectTaskModel(
   text: string,
   attachments: ChatAttachment[],
 ): string {
-  if (attachments.some((attachment) => attachment.kind === "image") && preferences.visionModelId)
+  if (
+    attachments.some((attachment) => attachment.kind === "image") &&
+    preferences.visionModelId
+  )
     return preferences.visionModelId;
   if (
     preferences.codingModelId &&
@@ -3092,7 +3404,9 @@ function toolActivityMetadata(
 ): Pick<ChatMessage, "activityKind" | "activityPlatform"> {
   if (name.startsWith("github_")) {
     const kind: ChatMessage["activityKind"] =
-      name.includes("workflow") || name.includes("branch") || name.includes("pull")
+      name.includes("workflow") ||
+      name.includes("branch") ||
+      name.includes("pull")
         ? "deploy"
         : name.includes("file") || name.includes("issue")
           ? "file"
@@ -3103,19 +3417,29 @@ function toolActivityMetadata(
     return { activityKind: "research", activityPlatform: "Web research" };
   if (name.startsWith("ai_workspace_"))
     return { activityKind: "workspace", activityPlatform: "Raabta workspace" };
-  if (name.includes("test") || name.includes("check") || name.includes("verify"))
+  if (
+    name.includes("test") ||
+    name.includes("check") ||
+    name.includes("verify")
+  )
     return { activityKind: "verify", activityPlatform: "Engineering checks" };
   return { activityKind: "agent", activityPlatform: "Raabta" };
 }
 
-function activityVisual(message: ChatMessage): { icon: IconName; platform: string } {
+function activityVisual(message: ChatMessage): {
+  icon: IconName;
+  platform: string;
+} {
   switch (message.activityKind) {
     case "research":
       return { icon: "search-outline", platform: "Web research" };
     case "model":
       return { icon: "sparkles-outline", platform: "AI model" };
     case "file":
-      return { icon: "document-text-outline", platform: message.activityPlatform ?? "Files" };
+      return {
+        icon: "document-text-outline",
+        platform: message.activityPlatform ?? "Files",
+      };
     case "github":
       return { icon: "logo-github", platform: "GitHub" };
     case "workspace":
@@ -3123,11 +3447,20 @@ function activityVisual(message: ChatMessage): { icon: IconName; platform: strin
     case "verify":
       return { icon: "shield-checkmark-outline", platform: "Verification" };
     case "deploy":
-      return { icon: "cloud-upload-outline", platform: message.activityPlatform ?? "Deployment" };
+      return {
+        icon: "cloud-upload-outline",
+        platform: message.activityPlatform ?? "Deployment",
+      };
     case "plan":
-      return { icon: "git-branch-outline", platform: message.activityPlatform ?? "Agent plan" };
+      return {
+        icon: "git-branch-outline",
+        platform: message.activityPlatform ?? "Agent plan",
+      };
     default:
-      return { icon: "construct-outline", platform: message.activityPlatform ?? "Raabta agent" };
+      return {
+        icon: "construct-outline",
+        platform: message.activityPlatform ?? "Raabta agent",
+      };
   }
 }
 
@@ -3196,7 +3529,9 @@ function LiveActivityIcon({
         { transform: [{ scale: pulse }] },
       ]}
     >
-      <View style={[styles.activityIconDepth, { backgroundColor: C.tealPale }]} />
+      <View
+        style={[styles.activityIconDepth, { backgroundColor: C.tealPale }]}
+      />
       <Animated.View
         style={[
           styles.activityIconFace,
@@ -3248,7 +3583,9 @@ function LiveActivityRow({ message }: { message: ChatMessage }) {
       <LiveActivityIcon icon={visual.icon} color={iconColor} status={status} />
       <View style={styles.activityBody}>
         <View style={styles.activityPlatformRow}>
-          <View style={[styles.activityPlatformDot, { backgroundColor: iconColor }]} />
+          <View
+            style={[styles.activityPlatformDot, { backgroundColor: iconColor }]}
+          />
           <Text style={styles.activityPlatform}>
             {message.activityPlatform ?? visual.platform}
           </Text>
@@ -3671,9 +4008,7 @@ function SetupStep({
       <Text style={[styles.setupStepText, done && styles.setupStepTextDone]}>
         {label}
       </Text>
-      {optional ? (
-        <Text style={styles.setupStepOptional}>·</Text>
-      ) : null}
+      {optional ? <Text style={styles.setupStepOptional}>·</Text> : null}
     </Pressable>
   );
 }
@@ -3834,7 +4169,12 @@ const styles = StyleSheet.create({
   setupStepText: { flex: 1, color: C.ink, fontSize: 12 },
   setupStepTextDone: { color: C.muted },
   setupStepOptional: { color: C.muted, fontSize: 12 },
-  checklistNote: { color: C.muted, fontSize: 10.5, lineHeight: 15, marginTop: 2 },
+  checklistNote: {
+    color: C.muted,
+    fontSize: 10.5,
+    lineHeight: 15,
+    marginTop: 2,
+  },
   safe: { flex: 1, backgroundColor: C.paper },
   autoDirection: { writingDirection: "auto", textAlign: "auto" },
   flex: { flex: 1 },
@@ -4022,7 +4362,12 @@ const styles = StyleSheet.create({
     borderColor: "#D6E8E1",
     gap: 4,
   },
-  routingHeader: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 2 },
+  routingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginBottom: 2,
+  },
   routingTitle: { color: C.tealDark, fontSize: 12, fontWeight: "700" },
   routingLine: { color: C.muted, fontSize: 11, lineHeight: 17 },
   messageRow: {
@@ -4655,5 +5000,31 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.72)",
   },
   messageAttachmentText: { flexShrink: 1, color: C.tealDark, fontSize: 10 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 5 },
+  historyDeleteButton: {
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: C.dangerPale,
+  },
+  storageCard: {
+    gap: 9,
+    marginTop: 10,
+    padding: 13,
+    borderRadius: 16,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  storageHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  storageRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 3,
+  },
+  storageLabel: { color: C.muted, fontSize: 11 },
+  storageValue: { color: C.ink, fontSize: 11, fontWeight: "700" },
   divider: { height: 1, backgroundColor: C.line, marginVertical: 5 },
 });

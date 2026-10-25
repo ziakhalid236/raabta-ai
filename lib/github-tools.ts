@@ -112,9 +112,10 @@ export async function updateGitHubFile(args: {
 }): Promise<GitHubWriteResult> {
   const contentBytes = new TextEncoder().encode(args.content).length;
   if (contentBytes > MAX_GITHUB_TEXT_BYTES)
-    throw new GitHubToolError("GitHub text files are limited to 50 MB per commit.");
-  if (contentBytes > CONTENTS_API_MAX_BYTES)
-    return commitLargeGitHubFile(args);
+    throw new GitHubToolError(
+      "GitHub text files are limited to 50 MB per commit.",
+    );
+  if (contentBytes > CONTENTS_API_MAX_BYTES) return commitLargeGitHubFile(args);
   let currentSha: string | undefined;
   try {
     const currentResponse = await githubFetch(
@@ -125,7 +126,8 @@ export async function updateGitHubFile(args: {
     const current: any = await currentResponse.json();
     currentSha = typeof current?.sha === "string" ? current.sha : undefined;
   } catch (error) {
-    if (!(error instanceof GitHubToolError) || error.status !== 404) throw error;
+    if (!(error instanceof GitHubToolError) || error.status !== 404)
+      throw error;
   }
   const response = await fetch(
     `${API}/repos/${encodeRepository(args.repository)}/contents/${args.path.replace(/^\//, "")}`,
@@ -157,9 +159,9 @@ export async function updateGitHubFile(args: {
       typeof payload?.content?.html_url === "string"
         ? payload.content.html_url
         : `https://github.com/${args.repository}/blob/${args.branch ?? "main"}/${args.path}`,
-        message: currentSha
-          ? "File updated and committed by the connected GitHub tool."
-          : "New file created and committed by the connected GitHub tool.",
+    message: currentSha
+      ? "File updated and committed by the connected GitHub tool."
+      : "New file created and committed by the connected GitHub tool.",
     sha: payload?.content?.sha,
   };
 }
@@ -181,7 +183,10 @@ async function commitLargeGitHubFile(args: {
   );
   const ref: any = await refResponse.json().catch(() => null);
   const headSha = typeof ref?.object?.sha === "string" ? ref.object.sha : "";
-  if (!headSha) throw new GitHubToolError("GitHub returned no branch head for the large-file commit.");
+  if (!headSha)
+    throw new GitHubToolError(
+      "GitHub returned no branch head for the large-file commit.",
+    );
 
   const commitResponse = await githubFetch(
     `/repos/${encodeRepository(args.repository)}/git/commits/${headSha}`,
@@ -190,7 +195,10 @@ async function commitLargeGitHubFile(args: {
   );
   const commit: any = await commitResponse.json().catch(() => null);
   const baseTree = typeof commit?.tree?.sha === "string" ? commit.tree.sha : "";
-  if (!baseTree) throw new GitHubToolError("GitHub returned no base tree for the large-file commit.");
+  if (!baseTree)
+    throw new GitHubToolError(
+      "GitHub returned no base tree for the large-file commit.",
+    );
 
   const blobResponse = await githubWrite(
     `/repos/${encodeRepository(args.repository)}/git/blobs`,
@@ -200,20 +208,33 @@ async function commitLargeGitHubFile(args: {
   );
   const blob: any = await blobResponse.json().catch(() => null);
   const blobSha = typeof blob?.sha === "string" ? blob.sha : "";
-  if (!blobSha) throw new GitHubToolError("GitHub returned no blob identifier for the large file.");
+  if (!blobSha)
+    throw new GitHubToolError(
+      "GitHub returned no blob identifier for the large file.",
+    );
 
   const treeResponse = await githubWrite(
     `/repos/${encodeRepository(args.repository)}/git/trees`,
     args.token,
     {
       base_tree: baseTree,
-      tree: [{ path: args.path.replace(/^\//, ""), mode: "100644", type: "blob", sha: blobSha }],
+      tree: [
+        {
+          path: args.path.replace(/^\//, ""),
+          mode: "100644",
+          type: "blob",
+          sha: blobSha,
+        },
+      ],
     },
     args.signal,
   );
   const tree: any = await treeResponse.json().catch(() => null);
   const treeSha = typeof tree?.sha === "string" ? tree.sha : "";
-  if (!treeSha) throw new GitHubToolError("GitHub returned no tree identifier for the large file.");
+  if (!treeSha)
+    throw new GitHubToolError(
+      "GitHub returned no tree identifier for the large file.",
+    );
 
   const newCommitResponse = await githubWrite(
     `/repos/${encodeRepository(args.repository)}/git/commits`,
@@ -223,7 +244,10 @@ async function commitLargeGitHubFile(args: {
   );
   const newCommit: any = await newCommitResponse.json().catch(() => null);
   const newCommitSha = typeof newCommit?.sha === "string" ? newCommit.sha : "";
-  if (!newCommitSha) throw new GitHubToolError("GitHub returned no commit identifier for the large file.");
+  if (!newCommitSha)
+    throw new GitHubToolError(
+      "GitHub returned no commit identifier for the large file.",
+    );
 
   await githubPatch(
     `/repos/${encodeRepository(args.repository)}/git/refs/heads/${encodeURIComponent(branch)}`,
@@ -286,6 +310,10 @@ export async function createGitHubBranch(args: {
   fromBranch?: string;
   signal?: AbortSignal;
 }): Promise<GitHubWriteResult> {
+  if (!isSafeBranchName(args.branch))
+    throw new GitHubToolError(
+      "Use a valid Git branch name without spaces, '..', or control characters.",
+    );
   const source = args.fromBranch ?? "main";
   const refResponse = await githubFetch(
     `/repos/${encodeRepository(args.repository)}/git/ref/heads/${encodeURIComponent(source)}`,
@@ -294,7 +322,10 @@ export async function createGitHubBranch(args: {
   );
   const ref: any = await refResponse.json().catch(() => null);
   const sha = typeof ref?.object?.sha === "string" ? ref.object.sha : "";
-  if (!sha) throw new GitHubToolError("GitHub returned no source commit for that branch.");
+  if (!sha)
+    throw new GitHubToolError(
+      "GitHub returned no source commit for that branch.",
+    );
   const response = await githubWrite(
     `/repos/${encodeRepository(args.repository)}/git/refs`,
     args.token,
@@ -325,7 +356,8 @@ export async function dispatchGitHubWorkflow(args: {
   );
   return {
     url: `https://github.com/${args.repository}/actions/workflows/${encodeURIComponent(args.workflow)}`,
-    message: "GitHub Actions workflow dispatched. Use workflow-run inspection to monitor it.",
+    message:
+      "GitHub Actions workflow dispatched. Use workflow-run inspection to monitor it.",
   };
 }
 
@@ -344,18 +376,22 @@ export async function listGitHubWorkflowRuns(
     signal,
   );
   const payload: any = await response.json().catch(() => null);
-  const runs = Array.isArray(payload?.workflow_runs) ? payload.workflow_runs : [];
+  const runs = Array.isArray(payload?.workflow_runs)
+    ? payload.workflow_runs
+    : [];
   return runs.flatMap((run: any) => {
     if (typeof run?.id !== "number") return [];
-    return [{
-      id: run.id,
-      name: typeof run.name === "string" ? run.name : "GitHub Actions",
-      status: typeof run.status === "string" ? run.status : "unknown",
-      conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
-      branch: typeof run.head_branch === "string" ? run.head_branch : "",
-      url: typeof run.html_url === "string" ? run.html_url : "",
-      createdAt: typeof run.created_at === "string" ? run.created_at : "",
-    } satisfies GitHubWorkflowRun];
+    return [
+      {
+        id: run.id,
+        name: typeof run.name === "string" ? run.name : "GitHub Actions",
+        status: typeof run.status === "string" ? run.status : "unknown",
+        conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
+        branch: typeof run.head_branch === "string" ? run.head_branch : "",
+        url: typeof run.html_url === "string" ? run.html_url : "",
+        createdAt: typeof run.created_at === "string" ? run.created_at : "",
+      } satisfies GitHubWorkflowRun,
+    ];
   });
 }
 
@@ -441,12 +477,31 @@ async function githubWrite(
       "Could not reach GitHub. Check the device network.",
     );
   }
-  if (!response.ok)
+  if (!response.ok) {
+    const payload: any = await response.json().catch(() => null);
+    const detail =
+      typeof payload?.message === "string"
+        ? payload.message
+        : Array.isArray(payload?.errors) && payload.errors[0]?.message
+          ? String(payload.errors[0].message)
+          : "GitHub rejected the write payload.";
     throw new GitHubToolError(
-      `GitHub write request failed (HTTP ${response.status}).`,
+      `GitHub write request failed (HTTP ${response.status}): ${detail}`,
       response.status,
     );
+  }
   return response;
+}
+function isSafeBranchName(value: string): boolean {
+  const branch = value.trim();
+  return Boolean(
+    branch &&
+    branch.length <= 250 &&
+    !branch.startsWith("/") &&
+    !branch.endsWith("/") &&
+    !branch.includes("..") &&
+    !/[\u0000-\u0020~^:?*\\]/.test(branch),
+  );
 }
 
 async function githubPatch(
@@ -470,7 +525,9 @@ async function githubPatch(
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new GitHubToolError("Could not reach GitHub. Check the device network.");
+    throw new GitHubToolError(
+      "Could not reach GitHub. Check the device network.",
+    );
   }
   if (!response.ok)
     throw new GitHubToolError(
